@@ -1,0 +1,35 @@
+# Minimal Supabase local config. Expand when linking a remote project (Phase 1).
+# https://supabase.com/docs/guides/cli/config
+
+project_id = "damroo-ai"
+
+[api]
+enabled = true
+
+[db]
+major_version = 15
+
+[functions]
+# Edge Functions live under supabase/functions/*
+
+[functions.enhance-prompt]
+verify_jwt = true
+
+[functions.generate-image]
+verify_jwt = true
+
+[functions.generate-caption]
+verify_jwt = true
+
+[functions.create-razorpay-order]
+verify_jwt = true
+
+[functions.verify-apple-iap]
+verify_jwt = true
+
+# Webhook + cron use custom auth (signature / CRON_SECRET)
+[functions.razorpay-webhook]
+verify_jwt = false
+
+[functions.cron-expire-subscriptions]
+verify_jwt = false
