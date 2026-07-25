@@ -1,3 +1,5 @@
+import { File } from 'expo-file-system';
+
 import { invokeFunction } from '@/services/api';
 import { supabase } from '@/lib/supabase';
 import type { ComposerAttachment } from '@/stores/chat-composer-store';
@@ -48,50 +50,79 @@ function localEnhance(prompt: string): string {
   return `${prompt.replace(/\.*$/, '')}. ${suffix}`;
 }
 
-/** Upload local file URIs to the private references bucket; keep remote URLs as-is. */
+function extensionForContentType(contentType: string): string {
+  if (contentType.includes('png')) return 'png';
+  if (contentType.includes('webp')) return 'webp';
+  if (contentType.includes('heic') || contentType.includes('heif')) return 'heic';
+  return 'jpg';
+}
+
+/** Best-effort content type from the file path when the caller doesn't already know it. */
+function guessContentTypeFromUri(uri: string): string {
+  const path = uri.split('?')[0].toLowerCase();
+  if (path.endsWith('.png')) return 'image/png';
+  if (path.endsWith('.webp')) return 'image/webp';
+  if (path.endsWith('.heic') || path.endsWith('.heif')) return 'image/heic';
+  return 'image/jpeg';
+}
+
+/**
+ * Uploads one local file/data URI to the private references bucket and
+ * returns a signed URL. Remote URLs pass through unchanged. Called eagerly
+ * as soon as an image is attached, so generation never depends on a local
+ * file still being present on the device.
+ *
+ * Reads the file via `expo-file-system`'s `File` (bytes, not a Blob) — React
+ * Native's `fetch(uri).blob()` is a well-known unreliable path for uploading
+ * local files through the Supabase JS client; it frequently produces
+ * corrupted or empty uploads. Passing raw bytes sidesteps that entirely.
+ */
+export async function uploadReferenceImage(
+  userId: string,
+  uri: string,
+  mimeType?: string | null,
+): Promise<string> {
+  if (uri.startsWith('http://') || uri.startsWith('https://')) {
+    return uri;
+  }
+
+  const contentType = mimeType || guessContentTypeFromUri(uri);
+  const ext = extensionForContentType(contentType);
+  const bytes = await new File(uri).bytes();
+  const path = `${userId}/${Date.now()}_${Math.random().toString(36).slice(2, 8)}.${ext}`;
+
+  const { error: uploadError } = await supabase.storage
+    .from('references')
+    .upload(path, bytes, {
+      contentType,
+      upsert: true,
+    });
+  if (uploadError) {
+    throw new Error(uploadError.message);
+  }
+
+  const { data: signed, error: signError } = await supabase.storage
+    .from('references')
+    .createSignedUrl(path, 60 * 60);
+  if (signError || !signed?.signedUrl) {
+    throw new Error(signError?.message ?? 'Failed to sign reference URL');
+  }
+  return signed.signedUrl;
+}
+
+/**
+ * Resolves every attachment to a remote URL. Attachments are uploaded
+ * eagerly on attach, so this is normally a no-op pass-through — kept as a
+ * defensive fallback in case anything ever reaches send still unresolved.
+ */
 export async function resolveReferenceUrls(
   userId: string,
   attachments: ComposerAttachment[],
 ): Promise<string[]> {
   const urls: string[] = [];
-
   for (const attachment of attachments) {
-    if (
-      attachment.uri.startsWith('http://') ||
-      attachment.uri.startsWith('https://')
-    ) {
-      urls.push(attachment.uri);
-      continue;
-    }
-
-    const response = await fetch(attachment.uri);
-    const blob = await response.blob();
-    const ext = blob.type.includes('png')
-      ? 'png'
-      : blob.type.includes('webp')
-        ? 'webp'
-        : 'jpg';
-    const path = `${userId}/${Date.now()}_${attachment.id}.${ext}`;
-
-    const { error: uploadError } = await supabase.storage
-      .from('references')
-      .upload(path, blob, {
-        contentType: blob.type || 'image/jpeg',
-        upsert: true,
-      });
-    if (uploadError) {
-      throw new Error(uploadError.message);
-    }
-
-    const { data: signed, error: signError } = await supabase.storage
-      .from('references')
-      .createSignedUrl(path, 60 * 60);
-    if (signError || !signed?.signedUrl) {
-      throw new Error(signError?.message ?? 'Failed to sign reference URL');
-    }
-    urls.push(signed.signedUrl);
+    urls.push(await uploadReferenceImage(userId, attachment.uri));
   }
-
   return urls;
 }
 
@@ -105,6 +136,14 @@ export async function generateImage(params: {
   conversationId?: string | null;
   templateId?: string | null;
   enhancedPrompt?: string | null;
+  /** Attach the brand kit logo as a reference image. Defaults to true. */
+  useBrandLogo?: boolean;
+  /** Mention the business name in the generation prompt. Defaults to true. */
+  useBrandName?: boolean;
+  /** Apply the brand kit color palette to the generation prompt. Defaults to true. */
+  useBrandColors?: boolean;
+  /** Which generation model to use — defaults to Seedream 4.5 server-side. */
+  modelId?: string;
 }): Promise<{
   imageUrl: string | null;
   generationId: string;
@@ -125,6 +164,10 @@ export async function generateImage(params: {
     reference_images: referenceImages,
     conversation_id: params.conversationId ?? null,
     template_id: params.templateId ?? null,
+    use_brand_logo: params.useBrandLogo ?? true,
+    use_brand_name: params.useBrandName ?? true,
+    use_brand_colors: params.useBrandColors ?? true,
+    model: params.modelId,
   });
 
   const assets = data.assets ?? data.generation?.generation_assets ?? [];

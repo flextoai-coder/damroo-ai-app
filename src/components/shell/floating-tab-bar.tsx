@@ -1,7 +1,7 @@
 import { BlurView } from 'expo-blur';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter, type Href } from 'expo-router';
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import {
   Pressable,
   StyleSheet,
@@ -18,6 +18,7 @@ import Animated, {
 } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { CaptionPickerSheet } from '@/components/captions/caption-picker-sheet';
 import {
   BrandKitTabIcon,
   CaptionChipIcon,
@@ -84,6 +85,7 @@ export function FloatingTabBar({ state, navigation }: FloatingTabBarProps) {
   const tabBarVisible = useTabShellStore((s) => s.tabBarVisible);
   const setFabOpen = useTabShellStore((s) => s.setFabOpen);
   const toggleFab = useTabShellStore((s) => s.toggleFab);
+  const [captionsPickerOpen, setCaptionsPickerOpen] = useState(false);
 
   const hideProgress = useSharedValue(0);
   const fabProgress = useSharedValue(0);
@@ -170,7 +172,7 @@ export function FloatingTabBar({ state, navigation }: FloatingTabBarProps) {
 
   const onGenerateCaptions = () => {
     setFabOpen(false);
-    // Captions flow lands in a later phase — keep the action visible.
+    setCaptionsPickerOpen(true);
   };
 
   return (
@@ -282,6 +284,11 @@ export function FloatingTabBar({ state, navigation }: FloatingTabBarProps) {
           </Pressable>
         </View>
       </Animated.View>
+
+      <CaptionPickerSheet
+        visible={captionsPickerOpen}
+        onClose={() => setCaptionsPickerOpen(false)}
+      />
     </View>
   );
 }

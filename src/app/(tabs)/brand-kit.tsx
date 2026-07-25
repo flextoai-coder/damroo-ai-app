@@ -29,6 +29,7 @@ import { useTabScreenPadding } from '@/hooks/use-screen-padding';
 import { useSession } from '@/hooks/use-session';
 import { useTabBarScroll } from '@/hooks/use-tab-bar-scroll';
 import { toUserErrorMessage } from '@/lib/errors';
+import { requestPhotoLibraryAccess } from '@/lib/media-permissions';
 import {
   brandLogoSignedUrl,
   removeBrandLogo,
@@ -102,11 +103,8 @@ export default function BrandKitScreen() {
 
   const onPickLogo = async () => {
     if (!user?.id) return;
-    const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (!permission.granted) {
-      toast('Photo access is needed to upload a logo', 'error');
-      return;
-    }
+    const granted = await requestPhotoLibraryAccess();
+    if (!granted) return;
 
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ['images'],

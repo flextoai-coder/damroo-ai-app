@@ -1,18 +1,92 @@
-import { BlurView } from 'expo-blur';
 import { LinearGradient } from 'expo-linear-gradient';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { useEffect, useState } from 'react';
+import { StyleSheet, Text, View } from 'react-native';
+import Animated, {
+  Easing,
+  FadeInDown,
+  FadeOutUp,
+  useAnimatedStyle,
+  useSharedValue,
+  withDelay,
+  withRepeat,
+  withTiming,
+} from 'react-native-reanimated';
 
 import { SparkleIcon } from '@/components/playground/icons';
 import { brand } from '@/constants/brand';
-import { SUGGESTION_CHIPS } from '@/constants/playground';
+import { PLAYGROUND_PROMPT_TIPS } from '@/constants/playground';
 
-type EmptyStateProps = {
-  onPickSuggestion: (text: string) => void;
-};
+const ROTATE_INTERVAL_MS = 2800;
+const TRANSITION_MS = 380;
 
-export function PlaygroundEmptyState({ onPickSuggestion }: EmptyStateProps) {
+/** Scattered ambient sparkles — purely decorative, sit behind the content. */
+const SPARKLES: { top: `${number}%`; left: `${number}%`; size: number; delay: number }[] = [
+  { top: '10%', left: '14%', size: 13, delay: 0 },
+  { top: '18%', left: '80%', size: 10, delay: 320 },
+  { top: '34%', left: '6%', size: 8, delay: 640 },
+  { top: '30%', left: '90%', size: 9, delay: 960 },
+  { top: '58%', left: '86%', size: 12, delay: 160 },
+  { top: '64%', left: '10%', size: 9, delay: 480 },
+  { top: '80%', left: '72%', size: 11, delay: 800 },
+  { top: '78%', left: '24%', size: 8, delay: 1120 },
+];
+
+function Twinkle({
+  top,
+  left,
+  size,
+  delay,
+}: {
+  top: `${number}%`;
+  left: `${number}%`;
+  size: number;
+  delay: number;
+}) {
+  const progress = useSharedValue(0);
+
+  useEffect(() => {
+    progress.value = withDelay(
+      delay,
+      withRepeat(withTiming(1, { duration: 1600, easing: Easing.inOut(Easing.quad) }), -1, true),
+    );
+  }, [delay, progress]);
+
+  const style = useAnimatedStyle(() => ({
+    opacity: 0.12 + progress.value * 0.5,
+    transform: [{ scale: 0.8 + progress.value * 0.4 }],
+  }));
+
+  return (
+    <Animated.View style={[styles.twinkle, { top, left }, style]}>
+      <SparkleIcon size={size} color={brand.orange} />
+    </Animated.View>
+  );
+}
+
+function BackgroundShimmer() {
+  return (
+    <View style={StyleSheet.absoluteFill} pointerEvents="none">
+      {SPARKLES.map((s, i) => (
+        <Twinkle key={i} {...s} />
+      ))}
+    </View>
+  );
+}
+
+/** Empty Playground screen — the rotating line is inspiration only, not tappable. */
+export function PlaygroundEmptyState() {
+  const [index, setIndex] = useState(0);
+
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setIndex((i) => (i + 1) % PLAYGROUND_PROMPT_TIPS.length);
+    }, ROTATE_INTERVAL_MS);
+    return () => clearInterval(timer);
+  }, []);
+
   return (
     <View style={styles.wrap}>
+      <BackgroundShimmer />
       <LinearGradient
         colors={[brand.orange, brand.orangeDeep]}
         start={{ x: 0, y: 0 }}
@@ -20,27 +94,27 @@ export function PlaygroundEmptyState({ onPickSuggestion }: EmptyStateProps) {
         style={styles.icon}>
         <SparkleIcon size={28} color="#FFFFFF" />
       </LinearGradient>
-      <Text style={styles.headline}>What shall we design?</Text>
-      <Text style={styles.body}>Describe a poster, story, or offer — Damroo will craft it.</Text>
-      <View style={styles.chips}>
-        {SUGGESTION_CHIPS.map((chip) => (
-          <Pressable
-            key={chip}
-            onPress={() => onPickSuggestion(chip)}
-            accessibilityRole="button"
-            accessibilityLabel={chip}
-            style={styles.chipHit}>
-            <BlurView intensity={36} tint="light" style={styles.chip}>
-              <Text style={styles.chipLabel}>{chip}</Text>
-            </BlurView>
-          </Pressable>
-        ))}
+      <Text style={styles.headline}>What shall Damroo design?</Text>
+
+      <Text style={styles.tickerLabel}>Try asking for something like</Text>
+      <View style={styles.tickerWrap}>
+        <Animated.Text
+          key={index}
+          entering={FadeInDown.duration(TRANSITION_MS)}
+          exiting={FadeOutUp.duration(TRANSITION_MS)}
+          style={styles.tickerText}
+          numberOfLines={1}>
+          “{PLAYGROUND_PROMPT_TIPS[index]}”
+        </Animated.Text>
       </View>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
+  twinkle: {
+    position: 'absolute',
+  },
   wrap: {
     flex: 1,
     alignItems: 'center',
@@ -71,27 +145,27 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     maxWidth: 280,
   },
-  chips: {
-    marginTop: 22,
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    justifyContent: 'center',
-    gap: 8,
+  tickerLabel: {
+    marginTop: 26,
+    fontSize: 11,
+    fontWeight: '800',
+    letterSpacing: 0.4,
+    textTransform: 'uppercase',
+    color: brand.mutedSoft,
   },
-  chipHit: {
-    maxWidth: '100%',
-  },
-  chip: {
-    borderRadius: 999,
+  tickerWrap: {
+    marginTop: 6,
+    height: 20,
+    width: '100%',
+    maxWidth: 320,
     overflow: 'hidden',
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(255,255,255,0.95)',
-    paddingHorizontal: 14,
-    paddingVertical: 9,
-    backgroundColor: 'rgba(255,255,255,0.45)',
   },
-  chipLabel: {
-    fontSize: 13,
+  tickerText: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    textAlign: 'center',
+    fontSize: 14,
     fontWeight: '600',
     color: brand.ink,
   },

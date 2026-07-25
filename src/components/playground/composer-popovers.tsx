@@ -1,9 +1,11 @@
 import { BlurView } from 'expo-blur';
 import type { ReactNode } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, Switch, Text, View } from 'react-native';
 
 import {
+  BrandIcon,
   CheckIcon,
+  PasteIcon,
   SparkleIcon,
   TemplateIcon,
   UploadIcon,
@@ -15,21 +17,28 @@ import {
   type PlaygroundFormat,
 } from '@/constants/playground';
 
-export type ComposerPopover = 'attach' | 'model' | 'format' | null;
+export type ComposerPopover = 'attach' | 'model' | 'format' | 'paste' | null;
 
 type PopoverShellProps = {
   visible: boolean;
   onClose: () => void;
   children: ReactNode;
+  /** Measured height of the composer card below, so the popover sits just above it instead of overlapping. */
+  composerHeight: number;
 };
 
-export function ComposerPopoverShell({ visible, onClose, children }: PopoverShellProps) {
+export function ComposerPopoverShell({
+  visible,
+  onClose,
+  children,
+  composerHeight,
+}: PopoverShellProps) {
   if (!visible) return null;
 
   return (
     <View style={styles.layer} pointerEvents="box-none">
       <Pressable style={styles.scrim} onPress={onClose} accessibilityLabel="Dismiss" />
-      <View style={styles.sheetWrap}>
+      <View style={[styles.sheetWrap, { paddingBottom: composerHeight + 10 }]}>
         <BlurView intensity={48} tint="light" style={styles.sheet}>
           {children}
         </BlurView>
@@ -41,9 +50,28 @@ export function ComposerPopoverShell({ visible, onClose, children }: PopoverShel
 type AttachPopoverProps = {
   onUpload: () => void;
   onTemplate: () => void;
+  onSelectModel: () => void;
+  activeModelName: string;
+  useBrandLogo: boolean;
+  useBrandName: boolean;
+  useBrandColors: boolean;
+  onToggleBrandLogo: (value: boolean) => void;
+  onToggleBrandName: (value: boolean) => void;
+  onToggleBrandColors: (value: boolean) => void;
 };
 
-export function AttachPopover({ onUpload, onTemplate }: AttachPopoverProps) {
+export function AttachPopover({
+  onUpload,
+  onTemplate,
+  onSelectModel,
+  activeModelName,
+  useBrandLogo,
+  useBrandName,
+  useBrandColors,
+  onToggleBrandLogo,
+  onToggleBrandName,
+  onToggleBrandColors,
+}: AttachPopoverProps) {
   return (
     <View style={styles.list}>
       <Row
@@ -58,6 +86,54 @@ export function AttachPopover({ onUpload, onTemplate }: AttachPopoverProps) {
         title="Use a template"
         subtitle="Remix a branded starting point"
         onPress={onTemplate}
+      />
+      <View style={styles.divider} />
+      <Row
+        icon={<SparkleIcon size={16} color={brand.orangeDeep} />}
+        title="Select model"
+        subtitle={`Currently: ${activeModelName}`}
+        onPress={onSelectModel}
+      />
+      <View style={styles.divider} />
+      <Text style={styles.sectionLabel}>Brand kit for this generation</Text>
+      <ToggleRow
+        icon={<BrandIcon />}
+        title="Use brand logo"
+        subtitle="Attach your logo as a reference image"
+        value={useBrandLogo}
+        onValueChange={onToggleBrandLogo}
+      />
+      <ToggleRow
+        icon={<BrandIcon />}
+        title="Use brand name"
+        subtitle="Mention your business name in the prompt"
+        value={useBrandName}
+        onValueChange={onToggleBrandName}
+      />
+      <ToggleRow
+        icon={<BrandIcon />}
+        title="Use brand colors"
+        subtitle="Apply your brand color palette"
+        value={useBrandColors}
+        onValueChange={onToggleBrandColors}
+      />
+    </View>
+  );
+}
+
+type PastePopoverProps = {
+  onPaste: () => void;
+};
+
+/** Revealed by long-pressing the attach button when the clipboard has an image. */
+export function PastePopover({ onPaste }: PastePopoverProps) {
+  return (
+    <View style={styles.list}>
+      <Row
+        icon={<PasteIcon />}
+        title="Paste"
+        subtitle="Use the image you've copied"
+        onPress={onPaste}
       />
     </View>
   );
@@ -163,6 +239,42 @@ function Row({
   );
 }
 
+function ToggleRow({
+  icon,
+  title,
+  subtitle,
+  value,
+  onValueChange,
+}: {
+  icon: ReactNode;
+  title: string;
+  subtitle: string;
+  value: boolean;
+  onValueChange: (value: boolean) => void;
+}) {
+  return (
+    <Pressable
+      onPress={() => onValueChange(!value)}
+      style={styles.row}
+      accessibilityRole="switch"
+      accessibilityState={{ checked: value }}
+      accessibilityLabel={title}>
+      <View style={styles.rowIcon}>{icon}</View>
+      <View style={styles.rowCopy}>
+        <Text style={styles.rowTitle}>{title}</Text>
+        <Text style={styles.rowSubtitle}>{subtitle}</Text>
+      </View>
+      <Switch
+        value={value}
+        onValueChange={onValueChange}
+        trackColor={{ false: '#E2E8F0', true: brand.orange }}
+        thumbColor="#FFFFFF"
+        style={styles.toggleSwitch}
+      />
+    </Pressable>
+  );
+}
+
 const styles = StyleSheet.create({
   layer: {
     ...StyleSheet.absoluteFill,
@@ -174,8 +286,6 @@ const styles = StyleSheet.create({
   },
   sheetWrap: {
     paddingHorizontal: 14,
-    /** Sit just above the floating composer card. */
-    paddingBottom: 118,
   },
   sheet: {
     borderRadius: 22,
@@ -214,6 +324,19 @@ const styles = StyleSheet.create({
   rowSubtitle: {
     marginTop: 2,
     fontSize: 12,
+    color: brand.muted,
+  },
+  toggleSwitch: {
+    pointerEvents: 'none',
+  },
+  sectionLabel: {
+    paddingHorizontal: 14,
+    paddingTop: 10,
+    paddingBottom: 2,
+    fontSize: 11,
+    fontWeight: '800',
+    letterSpacing: 0.4,
+    textTransform: 'uppercase',
     color: brand.muted,
   },
   divider: {

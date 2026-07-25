@@ -9,18 +9,18 @@ import {
   Text,
   TextInput,
   View,
+  type LayoutChangeEvent,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import {
   ArrowUpIcon,
-  ChevronDownIcon,
   CloseIcon,
   PlusAttachIcon,
   SparkleIcon,
 } from '@/components/playground/icons';
 import { brand } from '@/constants/brand';
-import { formatById, modelById } from '@/constants/playground';
+import { formatById } from '@/constants/playground';
 import type { ComposerAttachment } from '@/stores/chat-composer-store';
 import type { ComposerPopover } from '@/components/playground/composer-popovers';
 
@@ -29,7 +29,7 @@ type PlaygroundComposerProps = {
   onChangePrompt: (value: string) => void;
   attachments: ComposerAttachment[];
   onRemoveAttachment: (id: string) => void;
-  modelId: string;
+  onRetryAttachment: (attachment: ComposerAttachment) => void;
   aspectRatio: string;
   popover: ComposerPopover;
   onPopoverChange: (popover: ComposerPopover) => void;
@@ -37,6 +37,9 @@ type PlaygroundComposerProps = {
   onEnhance: () => void;
   sending: boolean;
   onSend: () => void;
+  /** Whether the system clipboard currently holds an image. */
+  clipboardHasImage: boolean;
+  onLayout?: (event: LayoutChangeEvent) => void;
 };
 
 export function PlaygroundComposer({
@@ -44,7 +47,7 @@ export function PlaygroundComposer({
   onChangePrompt,
   attachments,
   onRemoveAttachment,
-  modelId,
+  onRetryAttachment,
   aspectRatio,
   popover,
   onPopoverChange,
@@ -52,14 +55,17 @@ export function PlaygroundComposer({
   onEnhance,
   sending,
   onSend,
+  clipboardHasImage,
+  onLayout,
 }: PlaygroundComposerProps) {
   const insets = useSafeAreaInsets();
-  const model = modelById(modelId);
   const format = formatById(aspectRatio);
-  const canSend = prompt.trim().length > 0 && !sending;
+  const hasPendingUpload = attachments.some((a) => a.status === 'uploading');
+  const canSend = prompt.trim().length > 0 && !sending && !hasPendingUpload;
 
   return (
     <View
+      onLayout={onLayout}
       style={[
         styles.wrap,
         {
@@ -70,25 +76,53 @@ export function PlaygroundComposer({
       <BlurView intensity={52} tint="light" style={styles.card}>
         {attachments.length > 0 ? (
           <View style={styles.attachRow}>
-            {attachments.map((item) => (
-              <View key={item.id} style={styles.attachChip}>
-                <Image source={{ uri: item.uri }} style={styles.attachThumb} contentFit="cover" />
-                <View style={styles.attachCopy}>
-                  <Text style={styles.attachKind}>
-                    {item.kind === 'template' ? 'TEMPLATE' : 'REFERENCE'}
-                  </Text>
-                  <Text style={styles.attachTitle} numberOfLines={1}>
-                    {item.title}
-                  </Text>
-                </View>
+            {attachments.map((item) => {
+              const isUploading = item.status === 'uploading';
+              const isError = item.status === 'error';
+              return (
                 <Pressable
-                  onPress={() => onRemoveAttachment(item.id)}
-                  hitSlop={8}
-                  accessibilityLabel="Remove attachment">
-                  <CloseIcon />
+                  key={item.id}
+                  onPress={isError ? () => onRetryAttachment(item) : undefined}
+                  disabled={!isError}
+                  style={[styles.attachChip, isError && styles.attachChipError]}>
+                  <View style={styles.attachThumbWrap}>
+                    <Image
+                      source={{ uri: item.uri }}
+                      style={styles.attachThumb}
+                      contentFit="cover"
+                    />
+                    {isUploading ? (
+                      <View style={styles.attachThumbOverlay}>
+                        <ActivityIndicator size="small" color="#FFFFFF" />
+                      </View>
+                    ) : null}
+                    {isError ? (
+                      <View style={[styles.attachThumbOverlay, styles.attachThumbErrorOverlay]}>
+                        <Text style={styles.attachErrorMark}>!</Text>
+                      </View>
+                    ) : null}
+                  </View>
+                  <View style={styles.attachCopy}>
+                    <Text style={styles.attachKind}>
+                      {item.kind === 'template' ? 'TEMPLATE' : 'REFERENCE'}
+                    </Text>
+                    <Text style={styles.attachTitle} numberOfLines={1}>
+                      {isUploading
+                        ? 'Uploading…'
+                        : isError
+                          ? 'Upload failed — tap to retry'
+                          : item.title}
+                    </Text>
+                  </View>
+                  <Pressable
+                    onPress={() => onRemoveAttachment(item.id)}
+                    hitSlop={8}
+                    accessibilityLabel="Remove attachment">
+                    <CloseIcon />
+                  </Pressable>
                 </Pressable>
-              </View>
-            ))}
+              );
+            })}
           </View>
         ) : null}
 
@@ -105,20 +139,15 @@ export function PlaygroundComposer({
         <View style={styles.controls}>
           <Pressable
             onPress={() => onPopoverChange(popover === 'attach' ? null : 'attach')}
+            onLongPress={() => {
+              if (clipboardHasImage) onPopoverChange('paste');
+            }}
             style={styles.iconBtn}
-            accessibilityLabel="Attach">
+            accessibilityLabel="Attach"
+            accessibilityHint={
+              clipboardHasImage ? 'Long press to paste a copied image' : undefined
+            }>
             <PlusAttachIcon />
-          </Pressable>
-
-          <Pressable
-            onPress={() => onPopoverChange(popover === 'model' ? null : 'model')}
-            style={styles.pill}
-            accessibilityLabel="Model">
-            <SparkleIcon size={12} color={brand.orangeDeep} />
-            <Text style={styles.pillText} numberOfLines={1}>
-              {model.name}
-            </Text>
-            <ChevronDownIcon />
           </Pressable>
 
           <Pressable
@@ -205,11 +234,35 @@ const styles = StyleSheet.create({
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: brand.border,
   },
+  attachChipError: {
+    borderColor: 'rgba(220,38,38,0.5)',
+    backgroundColor: 'rgba(254,226,226,0.7)',
+  },
+  attachThumbWrap: {
+    width: 36,
+    height: 36,
+    borderRadius: 10,
+    overflow: 'hidden',
+  },
   attachThumb: {
     width: 36,
     height: 36,
     borderRadius: 10,
     backgroundColor: brand.orangeSoft,
+  },
+  attachThumbOverlay: {
+    ...StyleSheet.absoluteFill,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(15,23,42,0.45)',
+  },
+  attachThumbErrorOverlay: {
+    backgroundColor: 'rgba(220,38,38,0.55)',
+  },
+  attachErrorMark: {
+    color: '#FFFFFF',
+    fontSize: 16,
+    fontWeight: '800',
   },
   attachCopy: {
     flex: 1,

@@ -1,7 +1,14 @@
 import { BlurView } from 'expo-blur';
 import { Image } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
-import { Pressable, Share, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
+import {
+  ActivityIndicator,
+  Pressable,
+  StyleSheet,
+  Text,
+  useWindowDimensions,
+  View,
+} from 'react-native';
 
 import { ShareIcon, SparkleIcon } from '@/components/playground/icons';
 import { PulsingDots, ShimmerBlock } from '@/components/playground/shimmer';
@@ -43,9 +50,19 @@ type AssistantBubbleProps = {
   turn: AssistantTurn;
   onRegenerate: () => void;
   onSave: () => void;
+  onPress?: () => void;
+  onShare: () => void;
+  sharing?: boolean;
 };
 
-export function AssistantBubble({ turn, onRegenerate, onSave }: AssistantBubbleProps) {
+export function AssistantBubble({
+  turn,
+  onRegenerate,
+  onSave,
+  onPress,
+  onShare,
+  sharing,
+}: AssistantBubbleProps) {
   const { width } = useWindowDimensions();
   const format = formatById(turn.aspectRatio);
   const maxW = Math.min(width * 0.72, 280);
@@ -85,7 +102,12 @@ export function AssistantBubble({ turn, onRegenerate, onSave }: AssistantBubbleP
 
         {turn.status === 'done' ? (
           <>
-            <View style={[styles.resultFrame, { width: maxW, height: imgH }]}>
+            <Pressable
+              onPress={onPress}
+              disabled={!onPress}
+              style={[styles.resultFrame, { width: maxW, height: imgH }]}
+              accessibilityRole="button"
+              accessibilityLabel="View generation details">
               {turn.imageUrl ? (
                 <Image
                   source={{ uri: turn.imageUrl }}
@@ -103,19 +125,11 @@ export function AssistantBubble({ turn, onRegenerate, onSave }: AssistantBubbleP
               <View style={styles.badge}>
                 <Text style={styles.badgeText}>✦ AUTO-BRANDED</Text>
               </View>
-            </View>
+            </Pressable>
             <View style={styles.actions}>
               <GlassAction label="Regenerate" onPress={onRegenerate} />
               <GlassAction label="Save" onPress={onSave} />
-              <GlassAction
-                icon
-                onPress={() => {
-                  void Share.share({
-                    message: turn.imageUrl ?? 'Created with Damroo AI',
-                    url: turn.imageUrl ?? undefined,
-                  });
-                }}
-              />
+              <GlassAction icon busy={sharing} onPress={onShare} />
             </View>
           </>
         ) : null}
@@ -127,17 +141,29 @@ export function AssistantBubble({ turn, onRegenerate, onSave }: AssistantBubbleP
 function GlassAction({
   label,
   icon,
+  busy,
   onPress,
 }: {
   label?: string;
   icon?: boolean;
+  busy?: boolean;
   onPress: () => void;
 }) {
   return (
-    <Pressable onPress={onPress} accessibilityRole="button" accessibilityLabel={label ?? 'Share'}>
+    <Pressable
+      onPress={onPress}
+      disabled={busy}
+      accessibilityRole="button"
+      accessibilityLabel={label ?? 'Share'}>
       <BlurView intensity={36} tint="light" style={[styles.actionBtn, icon && styles.actionIcon]}>
         <View style={styles.actionInner}>
-          {icon ? <ShareIcon /> : <Text style={styles.actionLabel}>{label}</Text>}
+          {busy ? (
+            <ActivityIndicator size="small" color={brand.orangeDeep} />
+          ) : icon ? (
+            <ShareIcon />
+          ) : (
+            <Text style={styles.actionLabel}>{label}</Text>
+          )}
         </View>
       </BlurView>
     </Pressable>

@@ -3,7 +3,7 @@ import type { ReactNode } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { ChevronBackIcon, NewChatIcon } from '@/components/playground/icons';
+import { ChevronBackIcon, ChevronDownIcon } from '@/components/playground/icons';
 import { brand } from '@/constants/brand';
 import { modelById } from '@/constants/playground';
 import { screenTopPadding } from '@/constants/shell-layout';
@@ -12,9 +12,18 @@ type PlaygroundHeaderProps = {
   modelId: string;
   onBack: () => void;
   onNewChat: () => void;
+  onSelectModel: () => void;
+  /** Dims and disables the button when there's no active conversation to clear. */
+  newChatDisabled?: boolean;
 };
 
-export function PlaygroundHeader({ modelId, onBack, onNewChat }: PlaygroundHeaderProps) {
+export function PlaygroundHeader({
+  modelId,
+  onBack,
+  onNewChat,
+  onSelectModel,
+  newChatDisabled,
+}: PlaygroundHeaderProps) {
   const insets = useSafeAreaInsets();
   const model = modelById(modelId);
   // screenTopPadding already collapses Android safe-top (opaque status bar).
@@ -30,14 +39,32 @@ export function PlaygroundHeader({ modelId, onBack, onNewChat }: PlaygroundHeade
           <Text style={styles.title}>Playground</Text>
           <View style={styles.liveDot} />
         </View>
-        <Text style={styles.model} numberOfLines={1}>
-          {model.name}
-        </Text>
+        <Pressable
+          onPress={onSelectModel}
+          accessibilityRole="button"
+          accessibilityLabel="Change model"
+          hitSlop={6}
+          style={styles.modelRow}>
+          <Text style={styles.model} numberOfLines={1}>
+            {model.name}
+          </Text>
+          <ChevronDownIcon size={11} color={brand.muted} />
+        </Pressable>
       </View>
 
-      <GlassCircleButton onPress={onNewChat} accessibilityLabel="New chat">
-        <NewChatIcon />
-      </GlassCircleButton>
+      <Pressable
+        onPress={onNewChat}
+        disabled={newChatDisabled}
+        accessibilityRole="button"
+        accessibilityState={{ disabled: Boolean(newChatDisabled) }}
+        accessibilityLabel="New chat"
+        style={[styles.newChatHit, newChatDisabled && styles.newChatHitDisabled]}>
+        <BlurView intensity={40} tint="light" style={styles.newChatPill}>
+          <View style={styles.newChatInner}>
+            <Text style={styles.newChatLabel}>New Chat</Text>
+          </View>
+        </BlurView>
+      </Pressable>
     </View>
   );
 }
@@ -45,18 +72,22 @@ export function PlaygroundHeader({ modelId, onBack, onNewChat }: PlaygroundHeade
 function GlassCircleButton({
   children,
   onPress,
+  disabled,
   accessibilityLabel,
 }: {
   children: ReactNode;
   onPress: () => void;
+  disabled?: boolean;
   accessibilityLabel: string;
 }) {
   return (
     <Pressable
       onPress={onPress}
+      disabled={disabled}
       accessibilityRole="button"
+      accessibilityState={{ disabled: Boolean(disabled) }}
       accessibilityLabel={accessibilityLabel}
-      style={styles.circleHit}>
+      style={[styles.circleHit, disabled && styles.circleHitDisabled]}>
       <BlurView intensity={40} tint="light" style={styles.circle}>
         <View style={styles.circleInner}>{children}</View>
       </BlurView>
@@ -75,6 +106,34 @@ const styles = StyleSheet.create({
   circleHit: {
     width: 42,
     height: 42,
+  },
+  circleHitDisabled: {
+    opacity: 0.4,
+  },
+  newChatHit: {
+    height: 42,
+  },
+  newChatHitDisabled: {
+    opacity: 0.4,
+  },
+  newChatPill: {
+    height: 42,
+    borderRadius: 21,
+    overflow: 'hidden',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255,255,255,0.95)',
+  },
+  newChatInner: {
+    height: 42,
+    paddingHorizontal: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(255,255,255,0.55)',
+  },
+  newChatLabel: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: brand.ink,
   },
   circle: {
     flex: 1,
@@ -110,10 +169,18 @@ const styles = StyleSheet.create({
     borderRadius: 4,
     backgroundColor: '#22C55E',
   },
-  model: {
+  modelRow: {
     marginTop: 2,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+    alignSelf: 'flex-start',
+    maxWidth: '100%',
+  },
+  model: {
     fontSize: 12,
     fontWeight: '600',
     color: brand.muted,
+    flexShrink: 1,
   },
 });

@@ -16,20 +16,6 @@ export function ChevronBackIcon({ size = 20, color = '#0F172A' }: IconProps) {
   );
 }
 
-export function NewChatIcon({ size = 18, color = '#0F172A' }: IconProps) {
-  return (
-    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
-      <Path
-        d="M4 20l1.2-4.4A7.5 7.5 0 1118.4 18.8L14 20H4z"
-        stroke={color}
-        strokeWidth={1.8}
-        strokeLinejoin="round"
-      />
-      <Path d="M9 11h6M12 8v6" stroke={color} strokeWidth={1.8} strokeLinecap="round" />
-    </Svg>
-  );
-}
-
 export function SparkleIcon({ size = 18, color = '#FFFFFF' }: IconProps) {
   return (
     <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
@@ -141,6 +127,35 @@ export function UploadIcon({ size = 18, color = '#0F172A' }: IconProps) {
         strokeWidth={1.8}
         strokeLinecap="round"
       />
+    </Svg>
+  );
+}
+
+export function PasteIcon({ size = 18, color = '#0F172A' }: IconProps) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Rect x="6" y="4" width="12" height="17" rx="2" stroke={color} strokeWidth={1.8} />
+      <Path
+        d="M9 4a1.5 1.5 0 011.5-1.5h3A1.5 1.5 0 0115 4v1H9V4z"
+        stroke={color}
+        strokeWidth={1.8}
+        strokeLinejoin="round"
+      />
+      <Path d="M9 12h6M9 16h4" stroke={color} strokeWidth={1.8} strokeLinecap="round" />
+    </Svg>
+  );
+}
+
+export function BrandIcon({ size = 18, color = '#0F172A' }: IconProps) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Path
+        d="M4 12l7-7h5a2 2 0 012 2v5l-7 7a2 2 0 01-2.8 0L4 14.8a2 2 0 010-2.8z"
+        stroke={color}
+        strokeWidth={1.8}
+        strokeLinejoin="round"
+      />
+      <Circle cx="14.5" cy="9.5" r="1.4" fill={color} />
     </Svg>
   );
 }

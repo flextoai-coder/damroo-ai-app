@@ -2,6 +2,7 @@ import { BlurView } from 'expo-blur';
 import { Image } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter, type Href } from 'expo-router';
+import { useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 import {
   ActivityIndicator,
@@ -35,12 +36,16 @@ import { useTabScreenPadding } from '@/hooks/use-screen-padding';
 import { useSession } from '@/hooks/use-session';
 import { planDisplayName, useSubscription } from '@/hooks/use-subscription';
 import { useTabBarScroll } from '@/hooks/use-tab-bar-scroll';
-import { signOut } from '@/services/auth';
+import { deleteAccount, signOut } from '@/services/auth';
 import { fetchProfile } from '@/services/profile';
 import { useAuthStore } from '@/stores/auth-store';
+import { useChatComposerStore } from '@/stores/chat-composer-store';
+import { useOnboardingStore } from '@/stores/onboarding-store';
+import { usePlaygroundStore } from '@/stores/playground-store';
 
 export default function ProfileScreen() {
   const router = useRouter();
+  const queryClient = useQueryClient();
   const scrollProps = useTabBarScroll();
   const screenPadding = useTabScreenPadding();
   const { profile, user } = useSession();
@@ -50,6 +55,7 @@ export default function ProfileScreen() {
   const [signingOut, setSigningOut] = useState(false);
   const [refreshingProfile, setRefreshingProfile] = useState(false);
   const [plansOpen, setPlansOpen] = useState(false);
+  const [deletingAccount, setDeletingAccount] = useState(false);
 
   const fullName =
     profile?.full_name ??
@@ -109,6 +115,50 @@ export default function ProfileScreen() {
       { text: 'Cancel', style: 'cancel' },
       { text: 'Sign out', style: 'destructive', onPress: () => void onSignOut() },
     ]);
+  };
+
+  const onDeleteAccount = async () => {
+    setDeletingAccount(true);
+    try {
+      await deleteAccount();
+      queryClient.clear();
+      useChatComposerStore.getState().reset();
+      useOnboardingStore.getState().reset();
+      usePlaygroundStore.getState().clear();
+      useAuthStore.getState().reset();
+    } catch (e) {
+      Alert.alert('Delete account failed', e instanceof Error ? e.message : 'Try again');
+    } finally {
+      setDeletingAccount(false);
+    }
+  };
+
+  const confirmDeleteAccount = () => {
+    Alert.alert(
+      'Delete account?',
+      'This permanently deletes all your generations, brand kit, and subscription history. This cannot be undone.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Continue',
+          style: 'destructive',
+          onPress: () => {
+            Alert.alert(
+              'Are you absolutely sure?',
+              'There is no way to recover your account or data once it’s deleted.',
+              [
+                { text: 'Cancel', style: 'cancel' },
+                {
+                  text: 'Delete forever',
+                  style: 'destructive',
+                  onPress: () => void onDeleteAccount(),
+                },
+              ],
+            );
+          },
+        },
+      ],
+    );
   };
 
   const comingSoon = (label: string) => {
@@ -257,6 +307,23 @@ export default function ProfileScreen() {
               <Text style={styles.signOutLabel}>Sign out</Text>
             )}
           </Pressable>
+
+          <Pressable
+            onPress={confirmDeleteAccount}
+            disabled={deletingAccount}
+            accessibilityRole="button"
+            accessibilityLabel="Delete account"
+            style={({ pressed }) => [
+              styles.deleteBtn,
+              pressed && styles.deleteBtnPressed,
+              deletingAccount && styles.deleteBtnDisabled,
+            ]}>
+            {deletingAccount ? (
+              <ActivityIndicator color="#FFFFFF" />
+            ) : (
+              <Text style={styles.deleteLabel}>Delete account</Text>
+            )}
+          </Pressable>
         </View>
       </ScrollView>
 
@@ -391,5 +458,24 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '800',
     color: '#B91C1C',
+  },
+  deleteBtn: {
+    marginTop: 12,
+    minHeight: 52,
+    borderRadius: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#B91C1C',
+  },
+  deleteBtnPressed: {
+    opacity: 0.85,
+  },
+  deleteBtnDisabled: {
+    opacity: 0.7,
+  },
+  deleteLabel: {
+    fontSize: 16,
+    fontWeight: '800',
+    color: '#FFFFFF',
   },
 });

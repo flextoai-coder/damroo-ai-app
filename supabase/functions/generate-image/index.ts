@@ -1,7 +1,9 @@
 import 'jsr:@supabase/functions-js/edge-runtime.d.ts';
 
 import { loadBrandPromptContext, withBrandContext } from '../_shared/brand-context.ts';
+import { checkPromptContent } from '../_shared/content-filter.ts';
 import { corsHeaders, errorResponse, jsonResponse } from '../_shared/cors.ts';
+import { callGptImage } from '../_shared/gpt-image.ts';
 import { callSeedream } from '../_shared/seedream.ts';
 import { getServiceClient, requireUser } from '../_shared/supabase.ts';
 
@@ -15,7 +17,22 @@ type GenerateBody = {
   reference_images?: string[];
   conversation_id?: string | null;
   template_id?: string | null;
+  /** Per-generation brand kit toggles. Default to true when omitted. */
+  use_brand_logo?: boolean;
+  use_brand_name?: boolean;
+  use_brand_colors?: boolean;
+  /** Which generation model to use — defaults to Seedream 4.5 for anything else. */
+  model?: string;
 };
+
+function base64ToUint8Array(base64: string): Uint8Array {
+  const binary = atob(base64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) {
+    bytes[i] = binary.charCodeAt(i);
+  }
+  return bytes;
+}
 
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') {
@@ -46,6 +63,21 @@ Deno.serve(async (req) => {
     const imageCount = Math.min(15, Math.max(1, Number(body.image_count ?? 1) || 1));
     const references = (body.reference_images ?? []).filter(Boolean).slice(0, 14);
     const enhanced = body.enhanced_prompt?.trim() || null;
+
+    const promptCheck = checkPromptContent(prompt);
+    const enhancedCheck = enhanced ? checkPromptContent(enhanced) : { blocked: false };
+    if (promptCheck.blocked || enhancedCheck.blocked) {
+      return errorResponse(
+        (promptCheck.blocked ? promptCheck.reason : enhancedCheck.reason) ??
+          'This prompt cannot be generated.',
+        422,
+        { code: 'explicit_content' },
+      );
+    }
+
+    const useBrandLogo = body.use_brand_logo !== false;
+    const useBrandName = body.use_brand_name !== false;
+    const useBrandColors = body.use_brand_colors !== false;
 
     let conversationId = body.conversation_id ?? null;
     if (conversationId) {
@@ -125,32 +157,75 @@ Deno.serve(async (req) => {
       attachments: references.map((uri, i) => ({ uri, order: i })),
     });
 
-    const brandContext = await loadBrandPromptContext(service, userId);
+    const brandContext = await loadBrandPromptContext(service, userId, {
+      includeName: useBrandName,
+      includeColors: useBrandColors,
+      includeLogo: useBrandLogo,
+    });
     const seedreamPrompt = withBrandContext(enhanced || prompt, brandContext);
 
-    // Brand logo first (if any), then user reference images in attachment order.
+    // Brand logo first (if any and enabled), then user reference images in attachment order.
     let referenceImages = references;
-    const { data: kit } = await service
-      .from('brand_kits')
-      .select('logo_storage_path')
-      .eq('user_id', userId)
-      .maybeSingle();
-    if (kit?.logo_storage_path) {
-      const { data: signed } = await service.storage
-        .from('brand-assets')
-        .createSignedUrl(kit.logo_storage_path, 60 * 30);
-      if (signed?.signedUrl) {
-        referenceImages = [signed.signedUrl, ...references].slice(0, 14);
+    if (useBrandLogo) {
+      const { data: kit } = await service
+        .from('brand_kits')
+        .select('logo_storage_path')
+        .eq('user_id', userId)
+        .maybeSingle();
+      if (kit?.logo_storage_path) {
+        const { data: signed } = await service.storage
+          .from('brand-assets')
+          .createSignedUrl(kit.logo_storage_path, 60 * 30);
+        if (signed?.signedUrl) {
+          referenceImages = [signed.signedUrl, ...references].slice(0, 14);
+        }
       }
     }
 
-    const { urls } = await callSeedream({
-      prompt: seedreamPrompt,
-      aspectRatio,
-      quality,
-      imageCount,
-      referenceImages,
-    });
+    const useGptImage = body.model === 'gpt-image-2';
+
+    let rawAssets: Array<{ bytes: Uint8Array; contentType: string }>;
+    if (useGptImage) {
+      const { assets: gptAssets } = await callGptImage({
+        prompt: seedreamPrompt,
+        aspectRatio,
+        quality,
+        imageCount,
+        referenceImages,
+      });
+      rawAssets = gptAssets.map((a) => ({
+        bytes: base64ToUint8Array(a.base64),
+        contentType: a.contentType,
+      }));
+    } else {
+      const { urls } = await callSeedream({
+        prompt: seedreamPrompt,
+        aspectRatio,
+        quality,
+        imageCount,
+        referenceImages,
+      });
+      rawAssets = [];
+      for (let i = 0; i < urls.length; i++) {
+        const downloaded = await fetch(urls[i]);
+        if (!downloaded.ok) {
+          throw new Error(`Failed to download Seedream asset ${i + 1} (status ${downloaded.status})`);
+        }
+        const contentType = downloaded.headers.get('content-type') ?? 'image/jpeg';
+        if (!contentType.startsWith('image/')) {
+          // Seedream's CDN occasionally serves a non-image response (e.g. a
+          // transient error page) with a 200 status — fail clearly here
+          // instead of letting Storage reject it later with an opaque error.
+          throw new Error(
+            `Seedream asset ${i + 1} came back as "${contentType}" instead of an image. Please try again.`,
+          );
+        }
+        rawAssets.push({
+          bytes: new Uint8Array(await downloaded.arrayBuffer()),
+          contentType,
+        });
+      }
+    }
 
     const assets: Array<{
       generation_id: string;
@@ -159,14 +234,8 @@ Deno.serve(async (req) => {
       sort_order: number;
     }> = [];
 
-    for (let i = 0; i < urls.length; i++) {
-      const remoteUrl = urls[i];
-      const downloaded = await fetch(remoteUrl);
-      if (!downloaded.ok) {
-        throw new Error(`Failed to download Seedream asset ${i + 1}`);
-      }
-      const bytes = new Uint8Array(await downloaded.arrayBuffer());
-      const contentType = downloaded.headers.get('content-type') ?? 'image/jpeg';
+    for (let i = 0; i < rawAssets.length; i++) {
+      const { bytes, contentType } = rawAssets[i];
       const ext = contentType.includes('png') ? 'png' : contentType.includes('webp') ? 'webp' : 'jpg';
       const storagePath = `${userId}/${generationId}/${i}.${ext}`;
 

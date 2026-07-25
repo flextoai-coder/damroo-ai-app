@@ -3,6 +3,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { Pressable, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 
 import { brand } from '@/constants/brand';
+import { formatById } from '@/constants/playground';
 import type { Generation } from '@/services/generations';
 import { primaryAssetUrl } from '@/services/generations';
 
@@ -11,6 +12,15 @@ type GenerationsGridProps = {
   onPressGeneration: (id: string) => void;
   onCreate: () => void;
 };
+
+const MIN_TILE_HEIGHT = 110;
+const MAX_TILE_HEIGHT = 320;
+
+/** Tile height that reproduces the generation's actual aspect ratio at the given column width. */
+function tileHeight(generation: Generation, width: number): number {
+  const ratio = formatById(generation.aspect_ratio).ratio;
+  return Math.min(MAX_TILE_HEIGHT, Math.max(MIN_TILE_HEIGHT, width / ratio));
+}
 
 /** 2-column Pinterest-style grid of the user’s completed generations. */
 export function GenerationsGrid({
@@ -46,21 +56,21 @@ export function GenerationsGrid({
   return (
     <View style={styles.row}>
       <View style={[styles.col, { width: colWidth, gap }]}>
-        {left.map((g, i) => (
+        {left.map((g) => (
           <GridTile
             key={g.id}
             generation={g}
-            height={i % 2 === 0 ? 210 : 168}
+            height={tileHeight(g, colWidth)}
             onPress={() => onPressGeneration(g.id)}
           />
         ))}
       </View>
       <View style={[styles.col, { width: colWidth, gap }]}>
-        {right.map((g, i) => (
+        {right.map((g) => (
           <GridTile
             key={g.id}
             generation={g}
-            height={i % 2 === 0 ? 168 : 210}
+            height={tileHeight(g, colWidth)}
             onPress={() => onPressGeneration(g.id)}
           />
         ))}

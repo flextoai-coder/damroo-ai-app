@@ -22,6 +22,7 @@ function applyTemplateToComposer(template: Template) {
       uri: preview,
       kind: 'template',
       title: template.title,
+      status: 'ready',
     });
   }
 

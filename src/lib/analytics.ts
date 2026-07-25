@@ -3,6 +3,8 @@ type AnalyticsProps = Record<string, string | number | boolean | null | undefine
 type AnalyticsEvent =
   | 'generation_success'
   | 'generation_fail'
+  | 'generation_modify'
+  | 'caption_generated'
   | 'enhance_prompt'
   | 'pay_conversion'
   | 'share_generation'

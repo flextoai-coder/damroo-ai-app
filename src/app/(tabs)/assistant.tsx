@@ -1,3 +1,4 @@
+import * as Clipboard from 'expo-clipboard';
 import * as ImagePicker from 'expo-image-picker';
 import { useRouter, type Href } from 'expo-router';
 import { useEffect, useRef, useState } from 'react';
@@ -17,6 +18,7 @@ import {
   ComposerPopoverShell,
   FormatPopover,
   ModelPopover,
+  PastePopover,
   type ComposerPopover,
 } from '@/components/playground/composer-popovers';
 import { PlaygroundEmptyState } from '@/components/playground/empty-state';
@@ -27,14 +29,23 @@ import { TemplatePickerSheet } from '@/components/playground/template-picker-she
 import { PlanPickerSheet } from '@/components/profile/plan-picker-sheet';
 import { AppScreen } from '@/components/shell/app-screen';
 import type { Plan, PlanId } from '@/constants/plans';
+import { modelById } from '@/constants/playground';
 import { useSession } from '@/hooks/use-session';
 import { useSubscription } from '@/hooks/use-subscription';
 import { track } from '@/lib/analytics';
 import { isPlanUpgradeError, toUserErrorMessage } from '@/lib/errors';
-import { enhancePrompt, generateImage } from '@/services/playground';
+import { readClipboardImage } from '@/lib/clipboard-image';
+import { requestPhotoLibraryAccess } from '@/lib/media-permissions';
+import { shareImage } from '@/lib/share-image';
+import { fetchLatestCaption } from '@/services/generations';
+import { enhancePrompt, generateImage, uploadReferenceImage } from '@/services/playground';
 import { pickTemplateInPlayground } from '@/services/remix-template';
-import { useChatComposerStore } from '@/stores/chat-composer-store';
-import { usePlaygroundStore, type PlaygroundTurn } from '@/stores/playground-store';
+import { useChatComposerStore, type ComposerAttachment } from '@/stores/chat-composer-store';
+import {
+  usePlaygroundStore,
+  type AssistantTurn,
+  type PlaygroundTurn,
+} from '@/stores/playground-store';
 import { toast } from '@/stores/toast-store';
 
 function newId(prefix: string) {
@@ -50,6 +61,9 @@ export default function AssistantScreen() {
   const [plansOpen, setPlansOpen] = useState(false);
   const [enhancing, setEnhancing] = useState(false);
   const [sending, setSending] = useState(false);
+  const [sharingId, setSharingId] = useState<string | null>(null);
+  const [clipboardHasImage, setClipboardHasImage] = useState(false);
+  const [composerHeight, setComposerHeight] = useState(118);
   const subscriptionQuery = useSubscription();
   const subscription = subscriptionQuery.data;
   const isPaid = subscription?.status === 'active';
@@ -69,6 +83,7 @@ export default function AssistantScreen() {
   const setPrompt = useChatComposerStore((s) => s.setPrompt);
   const attachments = useChatComposerStore((s) => s.attachments);
   const addAttachment = useChatComposerStore((s) => s.addAttachment);
+  const updateAttachment = useChatComposerStore((s) => s.updateAttachment);
   const removeAttachment = useChatComposerStore((s) => s.removeAttachment);
   const modelId = useChatComposerStore((s) => s.modelId);
   const setModelId = useChatComposerStore((s) => s.setModelId);
@@ -77,6 +92,12 @@ export default function AssistantScreen() {
   const quality = useChatComposerStore((s) => s.quality);
   const imageCount = useChatComposerStore((s) => s.imageCount);
   const templateId = useChatComposerStore((s) => s.templateId);
+  const useBrandLogo = useChatComposerStore((s) => s.useBrandLogo);
+  const setUseBrandLogo = useChatComposerStore((s) => s.setUseBrandLogo);
+  const useBrandName = useChatComposerStore((s) => s.useBrandName);
+  const setUseBrandName = useChatComposerStore((s) => s.setUseBrandName);
+  const useBrandColors = useChatComposerStore((s) => s.useBrandColors);
+  const setUseBrandColors = useChatComposerStore((s) => s.setUseBrandColors);
   const resetComposer = useChatComposerStore((s) => s.reset);
 
   useEffect(() => {
@@ -87,10 +108,43 @@ export default function AssistantScreen() {
     return () => clearTimeout(t);
   }, [turns]);
 
+  useEffect(() => {
+    let mounted = true;
+    void Clipboard.hasImageAsync().then((has) => {
+      if (mounted) setClipboardHasImage(has);
+    });
+
+    const subscription = Clipboard.addClipboardListener(({ contentTypes }) => {
+      setClipboardHasImage(contentTypes.includes(Clipboard.ContentType.IMAGE));
+    });
+
+    return () => {
+      mounted = false;
+      subscription.remove();
+    };
+  }, []);
+
+  const hasComposerContent =
+    turns.length > 0 || prompt.trim().length > 0 || attachments.length > 0;
+
   const onNewChat = () => {
-    clearTurns();
-    resetComposer();
-    setPopover(null);
+    if (!hasComposerContent) return;
+    Alert.alert(
+      'Start a new chat?',
+      'This clears the current conversation. Your saved generations won’t be affected.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'New chat',
+          style: 'destructive',
+          onPress: () => {
+            clearTurns();
+            resetComposer();
+            setPopover(null);
+          },
+        },
+      ],
+    );
   };
 
   const onEnhance = async () => {
@@ -163,6 +217,10 @@ export default function AssistantScreen() {
         attachments: params.attachments,
         conversationId,
         templateId,
+        useBrandLogo,
+        useBrandName,
+        useBrandColors,
+        modelId,
       });
       setConversationId(result.conversationId);
       patchAssistant(params.assistantId, {
@@ -195,6 +253,15 @@ export default function AssistantScreen() {
   const onSend = async () => {
     const text = prompt.trim();
     if (!text || sending) return;
+
+    if (attachments.some((a) => a.status === 'uploading')) {
+      toast('Please wait for images to finish uploading', 'error');
+      return;
+    }
+    if (attachments.some((a) => a.status === 'error')) {
+      toast('Remove or retry the failed image before sending', 'error');
+      return;
+    }
 
     Keyboard.dismiss();
     setPopover(null);
@@ -267,12 +334,69 @@ export default function AssistantScreen() {
     toast('Saved to Your generations', 'success');
   };
 
-  const onUploadReference = async () => {
-    const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (!permission.granted) {
-      Alert.alert('Permission needed', 'Allow photo library access to attach reference images.');
+  const onShareGeneration = async (turn: AssistantTurn) => {
+    if (!turn.imageUrl || sharingId) return;
+    setSharingId(turn.id);
+    try {
+      const parent = turns.find((t) => t.role === 'user' && t.id === turn.parentUserId);
+      const promptFallback = parent && parent.role === 'user' ? parent.prompt : null;
+      const existingCaption = turn.generationId
+        ? await fetchLatestCaption(turn.generationId)
+        : null;
+      const text = existingCaption ?? promptFallback ?? 'Made with Damroo AI';
+
+      await Clipboard.setStringAsync(text);
+      toast('Caption copied', 'success');
+      await shareImage(turn.imageUrl, 'Share your design');
+    } catch (e) {
+      toast(toUserErrorMessage(e, 'Share failed'), 'error');
+    } finally {
+      setSharingId(null);
+    }
+  };
+
+  /** Uploads immediately on attach — generation never depends on the local file still being there. */
+  const attachLocalImage = async (
+    localUri: string,
+    title: string,
+    idPrefix: string,
+    mimeType?: string | null,
+  ) => {
+    const id = newId(idPrefix);
+    addAttachment({ id, uri: localUri, kind: 'reference', title, status: 'uploading' });
+
+    if (!user?.id) {
+      updateAttachment(id, { status: 'error' });
+      toast('You must be signed in to attach images', 'error');
       return;
     }
+
+    try {
+      const remoteUrl = await uploadReferenceImage(user.id, localUri, mimeType);
+      updateAttachment(id, { uri: remoteUrl, status: 'ready' });
+    } catch (e) {
+      updateAttachment(id, { status: 'error' });
+      toast(toUserErrorMessage(e, 'Couldn’t upload image'), 'error');
+    }
+  };
+
+  const onRetryAttachment = (attachment: ComposerAttachment) => {
+    if (!user?.id || attachment.status === 'uploading') return;
+    void (async () => {
+      updateAttachment(attachment.id, { status: 'uploading' });
+      try {
+        const remoteUrl = await uploadReferenceImage(user.id!, attachment.uri);
+        updateAttachment(attachment.id, { uri: remoteUrl, status: 'ready' });
+      } catch (e) {
+        updateAttachment(attachment.id, { status: 'error' });
+        toast(toUserErrorMessage(e, 'Couldn’t upload image'), 'error');
+      }
+    })();
+  };
+
+  const onUploadReference = async () => {
+    const granted = await requestPhotoLibraryAccess();
+    if (!granted) return;
 
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ['images'],
@@ -282,12 +406,20 @@ export default function AssistantScreen() {
 
     if (result.canceled || !result.assets[0]) return;
     const asset = result.assets[0];
-    addAttachment({
-      id: newId('ref'),
-      uri: asset.uri,
-      kind: 'reference',
-      title: asset.fileName ?? 'Reference',
-    });
+    void attachLocalImage(asset.uri, asset.fileName ?? 'Reference', 'ref', asset.mimeType);
+  };
+
+  const onPasteImage = async () => {
+    try {
+      const uri = await readClipboardImage();
+      if (!uri) {
+        toast('No image found on the clipboard', 'error');
+        return;
+      }
+      void attachLocalImage(uri, 'Pasted image', 'paste');
+    } catch (e) {
+      toast(toUserErrorMessage(e, 'Couldn’t paste image'), 'error');
+    }
   };
 
   const onUseTemplate = () => {
@@ -308,11 +440,13 @@ export default function AssistantScreen() {
             else router.replace('/(tabs)' as Href);
           }}
           onNewChat={onNewChat}
+          newChatDisabled={!hasComposerContent}
+          onSelectModel={() => setPopover('model')}
         />
 
         <View style={styles.flex}>
           {turns.length === 0 ? (
-            <PlaygroundEmptyState onPickSuggestion={setPrompt} />
+            <PlaygroundEmptyState />
           ) : (
             <FlatList
               ref={listRef}
@@ -330,6 +464,13 @@ export default function AssistantScreen() {
                     turn={item}
                     onRegenerate={() => onRegenerate(item.id, item.parentUserId)}
                     onSave={onSave}
+                    onPress={
+                      item.status === 'done' && item.generationId
+                        ? () => router.push(`/generation/${item.generationId}` as Href)
+                        : undefined
+                    }
+                    onShare={() => void onShareGeneration(item)}
+                    sharing={sharingId === item.id}
                   />
                 )
               }
@@ -337,7 +478,10 @@ export default function AssistantScreen() {
           )}
         </View>
 
-        <ComposerPopoverShell visible={popover !== null} onClose={() => setPopover(null)}>
+        <ComposerPopoverShell
+          visible={popover !== null}
+          onClose={() => setPopover(null)}
+          composerHeight={composerHeight}>
           {popover === 'attach' ? (
             <AttachPopover
               onUpload={() => {
@@ -348,6 +492,14 @@ export default function AssistantScreen() {
                 setPopover(null);
                 onUseTemplate();
               }}
+              onSelectModel={() => setPopover('model')}
+              activeModelName={modelById(modelId).name}
+              useBrandLogo={useBrandLogo}
+              useBrandName={useBrandName}
+              useBrandColors={useBrandColors}
+              onToggleBrandLogo={setUseBrandLogo}
+              onToggleBrandName={setUseBrandName}
+              onToggleBrandColors={setUseBrandColors}
             />
           ) : null}
           {popover === 'model' ? (
@@ -368,6 +520,14 @@ export default function AssistantScreen() {
               }}
             />
           ) : null}
+          {popover === 'paste' ? (
+            <PastePopover
+              onPaste={() => {
+                setPopover(null);
+                void onPasteImage();
+              }}
+            />
+          ) : null}
         </ComposerPopoverShell>
 
         <PlaygroundComposer
@@ -375,7 +535,7 @@ export default function AssistantScreen() {
           onChangePrompt={setPrompt}
           attachments={attachments}
           onRemoveAttachment={removeAttachment}
-          modelId={modelId}
+          onRetryAttachment={onRetryAttachment}
           aspectRatio={aspectRatio}
           popover={popover}
           onPopoverChange={setPopover}
@@ -383,6 +543,8 @@ export default function AssistantScreen() {
           onEnhance={() => void onEnhance()}
           sending={sending}
           onSend={() => void onSend()}
+          clipboardHasImage={clipboardHasImage}
+          onLayout={(e) => setComposerHeight(e.nativeEvent.layout.height)}
         />
       </KeyboardAvoidingView>
 

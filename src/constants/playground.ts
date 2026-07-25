@@ -20,14 +20,9 @@ export const PLAYGROUND_MODELS: PlaygroundModel[] = [
     description: 'ByteDance flagship for branded posters & product shots',
   },
   {
-    id: 'seedream-4.5-fast',
-    name: 'Seedream Fast',
-    description: 'Quicker drafts when you are iterating on layout',
-  },
-  {
-    id: 'seedream-4.5-detail',
-    name: 'Seedream Detail',
-    description: 'Higher fidelity textures for hero creatives',
+    id: 'gpt-image-2',
+    name: 'GPT Image 2',
+    description: 'OpenAI’s latest — strong text rendering & instruction-following',
   },
 ];
 
@@ -44,7 +39,8 @@ export const PLAYGROUND_FORMATS: PlaygroundFormat[] = [
 
 export const DEFAULT_FORMAT_ID = '1:1';
 
-export const SUGGESTION_CHIPS = [
+/** Rotating inspiration text shown on the empty Playground screen — not clickable. */
+export const PLAYGROUND_PROMPT_TIPS = [
   'Diwali offer poster for my cafe',
   'New menu launch story',
   'Weekend brunch Instagram post',

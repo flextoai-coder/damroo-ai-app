@@ -9,6 +9,7 @@ import {
   parseAuthCallbackUrl,
 } from '@/lib/auth-redirect';
 import { supabase } from '@/lib/supabase';
+import { invokeFunction } from '@/services/api';
 
 WebBrowser.maybeCompleteAuthSession();
 
@@ -219,6 +220,16 @@ export async function signOut() {
   if (error) {
     throw error;
   }
+}
+
+/**
+ * Permanently deletes the signed-in user's account: every DB row (cascades
+ * from `profiles`) and every file they've uploaded to Storage, via the
+ * `delete-account` Edge Function, then clears the local session.
+ */
+export async function deleteAccount() {
+  await invokeFunction('delete-account');
+  await supabase.auth.signOut();
 }
 
 function mapAuthError(error: { message?: string; status?: number }, fallback: string) {

@@ -3,6 +3,15 @@ import 'jsr:@supabase/functions-js/edge-runtime.d.ts';
 import { corsHeaders, errorResponse, jsonResponse } from '../_shared/cors.ts';
 import { getServiceClient, requireUser } from '../_shared/supabase.ts';
 
+/** Strips emoji/emoticon characters the model may add despite the prompt instruction. */
+function stripEmojis(text: string): string {
+  return text
+    .replace(/[\p{Extended_Pictographic}\u200d\uFE0F]/gu, '')
+    .replace(/[ \t]{2,}/g, ' ')
+    .replace(/ +\n/g, '\n')
+    .trim();
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders });
@@ -60,7 +69,7 @@ Deno.serve(async (req) => {
           {
             role: 'system',
             content:
-              'Write a short Instagram-ready caption for an Indian small-business marketing image. Include 4–8 relevant hashtags. Return plain text only.',
+              'Write a short Instagram-ready caption for an Indian small-business marketing image. Include 4–8 relevant hashtags. Do not use any emojis, emoticons, or decorative symbols anywhere in the caption or hashtags. Return plain text only.',
           },
           {
             role: 'user',
@@ -80,7 +89,9 @@ Deno.serve(async (req) => {
       return errorResponse(json?.error?.message ?? `OpenAI error ${res.status}`, 502);
     }
 
-    const text = json?.choices?.[0]?.message?.content?.trim();
+    const rawText = json?.choices?.[0]?.message?.content?.trim();
+    if (!rawText) return errorResponse('Empty caption from model', 502);
+    const text = stripEmojis(rawText);
     if (!text) return errorResponse('Empty caption from model', 502);
 
     if (generationId) {

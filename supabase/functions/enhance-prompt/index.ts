@@ -1,6 +1,7 @@
 import 'jsr:@supabase/functions-js/edge-runtime.d.ts';
 
 import { loadBrandPromptContext, withBrandContext } from '../_shared/brand-context.ts';
+import { checkPromptContent } from '../_shared/content-filter.ts';
 import { corsHeaders, errorResponse, jsonResponse } from '../_shared/cors.ts';
 import { getServiceClient, requireUser } from '../_shared/supabase.ts';
 
@@ -24,6 +25,13 @@ Deno.serve(async (req) => {
     const { prompt } = (await req.json()) as { prompt?: string };
     const trimmed = prompt?.trim() ?? '';
     if (!trimmed) return errorResponse('prompt is required');
+
+    const contentCheck = checkPromptContent(trimmed);
+    if (contentCheck.blocked) {
+      return errorResponse(contentCheck.reason ?? 'This prompt cannot be processed.', 422, {
+        code: 'explicit_content',
+      });
+    }
 
     const apiKey = Deno.env.get('OPENAI_API_KEY');
     if (!apiKey) return errorResponse('OPENAI_API_KEY is not configured', 500);
