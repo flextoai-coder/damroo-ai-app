@@ -1,5 +1,4 @@
 import * as Clipboard from 'expo-clipboard';
-import * as ImagePicker from 'expo-image-picker';
 import { useRouter, type Href } from 'expo-router';
 import { useEffect, useRef, useState } from 'react';
 import {
@@ -11,36 +10,54 @@ import {
   type NativeScrollEvent,
   type NativeSyntheticEvent,
 } from 'react-native';
-import { KeyboardAvoidingView } from 'react-native-keyboard-controller';
+import { useReanimatedKeyboardAnimation } from 'react-native-keyboard-controller';
+import Animated, { useAnimatedStyle } from 'react-native-reanimated';
 
 import {
-  AttachPopover,
+  BrandKitPopover,
   ComposerPopoverShell,
   FormatPopover,
   ModelPopover,
   PastePopover,
+  QualityCountPopover,
+  ReferenceZonePopover,
   type ComposerPopover,
 } from '@/components/playground/composer-popovers';
 import { PlaygroundEmptyState } from '@/components/playground/empty-state';
 import { AssistantBubble, UserBubble } from '@/components/playground/message-bubbles';
 import { PlaygroundComposer } from '@/components/playground/playground-composer';
 import { PlaygroundHeader } from '@/components/playground/playground-header';
+import { SelectImagesSheet } from '@/components/generation/select-images-sheet';
+import { ReferenceLibrarySheet } from '@/components/playground/reference-library-sheet';
 import { TemplatePickerSheet } from '@/components/playground/template-picker-sheet';
 import { PlanPickerSheet } from '@/components/profile/plan-picker-sheet';
 import { AppScreen } from '@/components/shell/app-screen';
+import { TemplateConfigureSheet } from '@/components/templates/template-configure-sheet';
 import type { Plan, PlanId } from '@/constants/plans';
-import { modelById } from '@/constants/playground';
+import { useBrandKit } from '@/hooks/use-brand-kit';
 import { useSession } from '@/hooks/use-session';
 import { useSubscription } from '@/hooks/use-subscription';
+import { useTemplateConfigureFlow } from '@/hooks/use-template-configure-flow';
 import { track } from '@/lib/analytics';
 import { isPlanUpgradeError, toUserErrorMessage } from '@/lib/errors';
 import { readClipboardImage } from '@/lib/clipboard-image';
-import { requestPhotoLibraryAccess } from '@/lib/media-permissions';
+import { requestSaveToGalleryAccess } from '@/lib/media-permissions';
+import { saveImageToGallery } from '@/lib/save-image';
 import { shareImage } from '@/lib/share-image';
+import { brandKitSwatches } from '@/services/brand-kit';
 import { fetchLatestCaption } from '@/services/generations';
 import { enhancePrompt, generateImage, uploadReferenceImage } from '@/services/playground';
+import {
+  isUserCancelledPurchase,
+  purchaseErrorMessage,
+  purchasePlan,
+} from '@/services/purchases';
 import { pickTemplateInPlayground } from '@/services/remix-template';
-import { useChatComposerStore, type ComposerAttachment } from '@/stores/chat-composer-store';
+import {
+  modelReferenceAttachments,
+  useChatComposerStore,
+  type ComposerAttachment,
+} from '@/stores/chat-composer-store';
 import {
   usePlaygroundStore,
   type AssistantTurn,
@@ -54,14 +71,31 @@ function newId(prefix: string) {
 
 export default function AssistantScreen() {
   const router = useRouter();
-  const { user } = useSession();
+  const { user, profile } = useSession();
+  const brandKitQuery = useBrandKit();
+  const brandKit = brandKitQuery.data;
+  const hasBrandLogo = Boolean(brandKit?.logo_storage_path);
+  const hasBrandName = Boolean(profile?.business_name?.trim());
+  const hasBrandColors = brandKitSwatches(brandKit).length > 0;
   const listRef = useRef<FlatList<PlaygroundTurn>>(null);
   const [popover, setPopover] = useState<ComposerPopover>(null);
   const [templatePickerOpen, setTemplatePickerOpen] = useState(false);
+  const [assetsSheetOpen, setAssetsSheetOpen] = useState(false);
+  const [productSheetOpen, setProductSheetOpen] = useState(false);
+  const configureFlow = useTemplateConfigureFlow({
+    onComplete: (template, selections) => {
+      pickTemplateInPlayground(template, selections);
+      toast(`Template “${template.title}” loaded`, 'success');
+    },
+  });
   const [plansOpen, setPlansOpen] = useState(false);
   const [enhancing, setEnhancing] = useState(false);
   const [sending, setSending] = useState(false);
   const [sharingId, setSharingId] = useState<string | null>(null);
+  const [savingId, setSavingId] = useState<string | null>(null);
+  const [selectSheet, setSelectSheet] = useState<{ urls: string[]; mode: 'save' | 'share' } | null>(
+    null,
+  );
   const [clipboardHasImage, setClipboardHasImage] = useState(false);
   const [composerHeight, setComposerHeight] = useState(118);
   const subscriptionQuery = useSubscription();
@@ -85,13 +119,20 @@ export default function AssistantScreen() {
   const addAttachment = useChatComposerStore((s) => s.addAttachment);
   const updateAttachment = useChatComposerStore((s) => s.updateAttachment);
   const removeAttachment = useChatComposerStore((s) => s.removeAttachment);
+  const clearAttachments = useChatComposerStore((s) => s.clearAttachments);
   const modelId = useChatComposerStore((s) => s.modelId);
   const setModelId = useChatComposerStore((s) => s.setModelId);
   const aspectRatio = useChatComposerStore((s) => s.aspectRatio);
   const setAspectRatio = useChatComposerStore((s) => s.setAspectRatio);
   const quality = useChatComposerStore((s) => s.quality);
+  const setQuality = useChatComposerStore((s) => s.setQuality);
   const imageCount = useChatComposerStore((s) => s.imageCount);
+  const setImageCount = useChatComposerStore((s) => s.setImageCount);
+  const variation = useChatComposerStore((s) => s.variation);
+  const setVariation = useChatComposerStore((s) => s.setVariation);
   const templateId = useChatComposerStore((s) => s.templateId);
+  const templateLockedPrompt = useChatComposerStore((s) => s.templateLockedPrompt);
+  const clearTemplateLock = useChatComposerStore((s) => s.clearTemplateLock);
   const useBrandLogo = useChatComposerStore((s) => s.useBrandLogo);
   const setUseBrandLogo = useChatComposerStore((s) => s.setUseBrandLogo);
   const useBrandName = useChatComposerStore((s) => s.useBrandName);
@@ -99,6 +140,22 @@ export default function AssistantScreen() {
   const useBrandColors = useChatComposerStore((s) => s.useBrandColors);
   const setUseBrandColors = useChatComposerStore((s) => s.setUseBrandColors);
   const resetComposer = useChatComposerStore((s) => s.reset);
+
+  useEffect(() => {
+    if (!hasBrandLogo && useBrandLogo) setUseBrandLogo(false);
+    if (!hasBrandName && useBrandName) setUseBrandName(false);
+    if (!hasBrandColors && useBrandColors) setUseBrandColors(false);
+  }, [
+    hasBrandLogo,
+    useBrandLogo,
+    setUseBrandLogo,
+    hasBrandName,
+    useBrandName,
+    setUseBrandName,
+    hasBrandColors,
+    useBrandColors,
+    setUseBrandColors,
+  ]);
 
   useEffect(() => {
     if (turns.length === 0) return;
@@ -125,7 +182,10 @@ export default function AssistantScreen() {
   }, []);
 
   const hasComposerContent =
-    turns.length > 0 || prompt.trim().length > 0 || attachments.length > 0;
+    turns.length > 0 ||
+    prompt.trim().length > 0 ||
+    attachments.length > 0 ||
+    Boolean(templateLockedPrompt);
 
   const onNewChat = () => {
     if (!hasComposerContent) return;
@@ -147,11 +207,41 @@ export default function AssistantScreen() {
     );
   };
 
+  /**
+   * Chat memory: if the user follows up with no new attachment (didn't open
+   * the image detail screen to remix), treat the most recently generated
+   * image in this conversation as an implicit reference — so a bare
+   * "make the sky orange instead" continues editing it instead of starting
+   * a brand-new, unrelated image.
+   */
+  const lastGeneratedImageUrl = (): string | null => {
+    for (let i = turns.length - 1; i >= 0; i--) {
+      const t = turns[i];
+      if (t.role === 'assistant' && t.status === 'done' && t.imageUrls[0]) {
+        return t.imageUrls[0];
+      }
+    }
+    return null;
+  };
+
   const onEnhance = async () => {
     if (!prompt.trim() || enhancing) return;
     setEnhancing(true);
     try {
-      const next = await enhancePrompt(prompt);
+      const readyAttachmentUrls = modelReferenceAttachments(attachments)
+        .filter((a) => a.status === 'ready')
+        .map((a) => a.uri);
+      const previousImageUrl = readyAttachmentUrls.length === 0 ? lastGeneratedImageUrl() : null;
+      const referenceImages = previousImageUrl ? [previousImageUrl] : readyAttachmentUrls;
+
+      const next = await enhancePrompt({
+        prompt,
+        aspectRatio,
+        referenceImages,
+        useBrandLogo,
+        useBrandName,
+        useBrandColors,
+      });
       setPrompt(next);
       track('enhance_prompt');
       toast('Prompt enhanced', 'success');
@@ -167,9 +257,16 @@ export default function AssistantScreen() {
     setPlansOpen(true);
   };
 
-  const onSelectPlan = (_plan: Plan) => {
+  const onSelectPlan = async (plan: Plan) => {
     setPlansOpen(false);
-    router.push('/(onboarding)/subscription' as Href);
+    try {
+      await purchasePlan(plan.id);
+      await subscriptionQuery.refetch();
+      toast(`You're on ${plan.name} now!`, 'success');
+    } catch (e) {
+      if (isUserCancelledPurchase(e)) return;
+      toast(purchaseErrorMessage(e), 'error');
+    }
   };
 
   /** True when client already knows generation will be blocked. */
@@ -182,6 +279,7 @@ export default function AssistantScreen() {
     turnUserId: string;
     assistantId: string;
     prompt: string;
+    lockedPrompt: string | null;
     aspectRatio: string;
     attachments: typeof attachments;
   }) => {
@@ -211,9 +309,11 @@ export default function AssistantScreen() {
       const result = await generateImage({
         userId: user.id,
         prompt: params.prompt,
+        lockedPrompt: params.lockedPrompt,
         aspectRatio: params.aspectRatio,
         quality,
         imageCount,
+        variation,
         attachments: params.attachments,
         conversationId,
         templateId,
@@ -225,9 +325,10 @@ export default function AssistantScreen() {
       setConversationId(result.conversationId);
       patchAssistant(params.assistantId, {
         status: 'done',
-        imageUrl: result.imageUrl,
+        imageUrls: result.imageUrls,
         generationId: result.generationId,
         error: null,
+        brandKitApplied: useBrandLogo || useBrandName || useBrandColors,
       });
       void subscriptionQuery.refetch();
       track('generation_success', {
@@ -251,8 +352,9 @@ export default function AssistantScreen() {
   };
 
   const onSend = async () => {
-    const text = prompt.trim();
-    if (!text || sending) return;
+    const freeText = prompt.trim();
+    const lockedText = templateLockedPrompt?.trim() || null;
+    if ((!freeText && !lockedText) || sending) return;
 
     if (attachments.some((a) => a.status === 'uploading')) {
       toast('Please wait for images to finish uploading', 'error');
@@ -283,9 +385,30 @@ export default function AssistantScreen() {
     const snapshotRatio = aspectRatio;
     const snapshotModel = modelId;
 
+    // Only fall back to the previous image when the user didn't attach
+    // anything themselves this turn.
+    const previousImageUrl =
+      snapshotAttachments.length === 0 ? lastGeneratedImageUrl() : null;
+    const effectiveAttachments = previousImageUrl
+      ? [
+          {
+            id: 'chat-memory-ref',
+            uri: previousImageUrl,
+            kind: 'reference' as const,
+            title: 'Previous generation',
+            status: 'ready' as const,
+          },
+        ]
+      : snapshotAttachments;
+
+    // The full text the user acted on — shown in the chat bubble and
+    // replayed verbatim on regenerate, including whatever was locked in
+    // from a template alongside any free-text additions.
+    const displayText = [lockedText, freeText].filter(Boolean).join('\n\n');
+
     addUserTurn({
       id: turnUserId,
-      prompt: text,
+      prompt: displayText,
       attachments: snapshotAttachments,
       aspectRatio: snapshotRatio,
       modelId: snapshotModel,
@@ -294,20 +417,27 @@ export default function AssistantScreen() {
       id: assistantId,
       status: 'loading',
       aspectRatio: snapshotRatio,
-      imageUrl: null,
+      imageCount,
+      imageUrls: [],
       generationId: null,
       error: null,
       parentUserId: turnUserId,
+      brandKitApplied: useBrandLogo || useBrandName || useBrandColors,
     });
 
     setPrompt('');
+    // Clear the composer's reference/template attachments (and the template
+    // lock, if any) now that they've been handed off to this turn — don't
+    // leave them to silently reattach to whatever the user sends next.
+    clearAttachments();
 
     await runGeneration({
       turnUserId,
       assistantId,
-      prompt: text,
+      prompt: freeText,
+      lockedPrompt: lockedText,
       aspectRatio: snapshotRatio,
-      attachments: snapshotAttachments,
+      attachments: effectiveAttachments,
     });
   };
 
@@ -317,25 +447,62 @@ export default function AssistantScreen() {
 
     patchAssistant(assistantId, {
       status: 'loading',
-      imageUrl: null,
+      // Refresh to the live count — regenerate uses whatever's currently
+      // set in the composer, same as quality/brand kit already do, so the
+      // skeleton should match what's actually about to be requested.
+      imageCount,
+      imageUrls: [],
       error: null,
     });
 
     void runGeneration({
       turnUserId: parent.id,
       assistantId,
+      // Replays the exact text from the original turn — already includes
+      // whatever was locked in at the time, so there's nothing new to lock.
       prompt: parent.prompt,
+      lockedPrompt: null,
       aspectRatio: parent.aspectRatio,
       attachments: parent.attachments,
     });
   };
 
-  const onSave = () => {
-    toast('Saved to Your generations', 'success');
+  const onSaveGeneration = async (turn: AssistantTurn) => {
+    const imageUrl = turn.imageUrls[0];
+    if (!imageUrl || savingId) return;
+
+    // More than one image in this result — let the user pick which ones to
+    // save instead of always grabbing just the first.
+    if (turn.imageUrls.length > 1) {
+      setSelectSheet({ urls: turn.imageUrls, mode: 'save' });
+      return;
+    }
+
+    setSavingId(turn.id);
+    try {
+      const granted = await requestSaveToGalleryAccess();
+      if (!granted) return;
+      await saveImageToGallery(imageUrl);
+      toast('Saved to your photos', 'success');
+    } catch (e) {
+      toast(toUserErrorMessage(e, 'Couldn’t save image'), 'error');
+    } finally {
+      setSavingId(null);
+    }
   };
 
   const onShareGeneration = async (turn: AssistantTurn) => {
-    if (!turn.imageUrl || sharingId) return;
+    const imageUrl = turn.imageUrls[0];
+    if (!imageUrl || sharingId) return;
+
+    // More than one image in this result — let the user pick which one to
+    // share instead of always defaulting to the first. Skips the
+    // caption-copy step below; that's specific to the single-image case.
+    if (turn.imageUrls.length > 1) {
+      setSelectSheet({ urls: turn.imageUrls, mode: 'share' });
+      return;
+    }
+
     setSharingId(turn.id);
     try {
       const parent = turns.find((t) => t.role === 'user' && t.id === turn.parentUserId);
@@ -347,7 +514,7 @@ export default function AssistantScreen() {
 
       await Clipboard.setStringAsync(text);
       toast('Caption copied', 'success');
-      await shareImage(turn.imageUrl, 'Share your design');
+      await shareImage(imageUrl, 'Share your design');
     } catch (e) {
       toast(toUserErrorMessage(e, 'Share failed'), 'error');
     } finally {
@@ -394,21 +561,6 @@ export default function AssistantScreen() {
     })();
   };
 
-  const onUploadReference = async () => {
-    const granted = await requestPhotoLibraryAccess();
-    if (!granted) return;
-
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ['images'],
-      quality: 0.9,
-      allowsMultipleSelection: false,
-    });
-
-    if (result.canceled || !result.assets[0]) return;
-    const asset = result.assets[0];
-    void attachLocalImage(asset.uri, asset.fileName ?? 'Reference', 'ref', asset.mimeType);
-  };
-
   const onPasteImage = async () => {
     try {
       const uri = await readClipboardImage();
@@ -426,119 +578,168 @@ export default function AssistantScreen() {
     setTemplatePickerOpen(true);
   };
 
+  /**
+   * The attach zones, format, and quality/count controls all open through
+   * this same handler. The popover shell tracks the live keyboard height
+   * itself (see ComposerPopoverShell), so it stays correctly positioned
+   * above the composer whether or not the keyboard is up — no need to
+   * dismiss the keyboard first.
+   */
+  const onPopoverChange = (next: ComposerPopover) => {
+    setPopover(next);
+  };
+
+  const onAddProduct = () => {
+    Keyboard.dismiss();
+    setPopover(null);
+    setProductSheetOpen(true);
+  };
+
   const onScrollBeginDrag = (_e: NativeSyntheticEvent<NativeScrollEvent>) => {
     setPopover(null);
   };
 
+  const { height: kbHeight } = useReanimatedKeyboardAnimation();
+  const composerOverlayStyle = useAnimatedStyle(() => ({
+    transform: [{ translateY: kbHeight.value }],
+  }));
+
   return (
     <AppScreen edges={[]} glowBlobs contentStyle={styles.screen}>
-      <KeyboardAvoidingView style={styles.flex} behavior="padding">
-        <PlaygroundHeader
-          modelId={modelId}
-          onBack={() => {
-            if (router.canGoBack()) router.back();
-            else router.replace('/(tabs)' as Href);
-          }}
-          onNewChat={onNewChat}
-          newChatDisabled={!hasComposerContent}
-          onSelectModel={() => setPopover('model')}
-        />
+      <PlaygroundHeader
+        modelId={modelId}
+        onBack={() => {
+          if (router.canGoBack()) router.back();
+          else router.replace('/(tabs)' as Href);
+        }}
+        onNewChat={onNewChat}
+        newChatDisabled={!hasComposerContent}
+        onSelectModel={() => setPopover(popover === 'model' ? null : 'model')}
+      />
 
-        <View style={styles.flex}>
-          {turns.length === 0 ? (
-            <PlaygroundEmptyState />
-          ) : (
-            <FlatList
-              ref={listRef}
-              data={turns}
-              keyExtractor={(item) => item.id}
-              contentContainerStyle={styles.listContent}
-              showsVerticalScrollIndicator={false}
-              onScrollBeginDrag={onScrollBeginDrag}
-              keyboardShouldPersistTaps="handled"
-              renderItem={({ item }) =>
-                item.role === 'user' ? (
-                  <UserBubble turn={item} />
-                ) : (
-                  <AssistantBubble
-                    turn={item}
-                    onRegenerate={() => onRegenerate(item.id, item.parentUserId)}
-                    onSave={onSave}
-                    onPress={
-                      item.status === 'done' && item.generationId
-                        ? () => router.push(`/generation/${item.generationId}` as Href)
-                        : undefined
-                    }
-                    onShare={() => void onShareGeneration(item)}
-                    sharing={sharingId === item.id}
-                  />
-                )
-              }
-            />
-          )}
-        </View>
+      <View style={[styles.flex, { paddingBottom: composerHeight }]}>
+        {turns.length === 0 ? (
+          <PlaygroundEmptyState />
+        ) : (
+          <FlatList
+            ref={listRef}
+            data={turns}
+            keyExtractor={(item) => item.id}
+            contentContainerStyle={styles.listContent}
+            showsVerticalScrollIndicator={false}
+            onScrollBeginDrag={onScrollBeginDrag}
+            keyboardShouldPersistTaps="handled"
+            renderItem={({ item }) =>
+              item.role === 'user' ? (
+                <UserBubble turn={item} />
+              ) : (
+                <AssistantBubble
+                  turn={item}
+                  onRegenerate={() => onRegenerate(item.id, item.parentUserId)}
+                  onSave={() => void onSaveGeneration(item)}
+                  onPress={
+                    item.status === 'done' && item.generationId
+                      ? () => router.push(`/generation/${item.generationId}` as Href)
+                      : undefined
+                  }
+                  onShare={() => void onShareGeneration(item)}
+                  sharing={sharingId === item.id}
+                  saving={savingId === item.id}
+                />
+              )
+            }
+          />
+        )}
+      </View>
 
-        <ComposerPopoverShell
-          visible={popover !== null}
-          onClose={() => setPopover(null)}
-          composerHeight={composerHeight}>
-          {popover === 'attach' ? (
-            <AttachPopover
-              onUpload={() => {
-                setPopover(null);
-                void onUploadReference();
-              }}
-              onTemplate={() => {
-                setPopover(null);
-                onUseTemplate();
-              }}
-              onSelectModel={() => setPopover('model')}
-              activeModelName={modelById(modelId).name}
-              useBrandLogo={useBrandLogo}
-              useBrandName={useBrandName}
-              useBrandColors={useBrandColors}
-              onToggleBrandLogo={setUseBrandLogo}
-              onToggleBrandName={setUseBrandName}
-              onToggleBrandColors={setUseBrandColors}
-            />
-          ) : null}
-          {popover === 'model' ? (
-            <ModelPopover
-              activeId={modelId}
-              onSelect={(id) => {
-                setModelId(id);
-                setPopover(null);
-              }}
-            />
-          ) : null}
-          {popover === 'format' ? (
-            <FormatPopover
-              activeId={aspectRatio}
-              onSelect={(id) => {
-                setAspectRatio(id);
-                setPopover(null);
-              }}
-            />
-          ) : null}
-          {popover === 'paste' ? (
-            <PastePopover
-              onPaste={() => {
-                setPopover(null);
-                void onPasteImage();
-              }}
-            />
-          ) : null}
-        </ComposerPopoverShell>
+      <ComposerPopoverShell
+        visible={popover !== null}
+        onClose={() => setPopover(null)}
+        composerHeight={composerHeight}>
+        {popover === 'referenceMenu' ? (
+          <ReferenceZonePopover
+            onAddReference={() => {
+              setPopover(null);
+              setAssetsSheetOpen(true);
+            }}
+            onTemplate={() => {
+              setPopover(null);
+              onUseTemplate();
+            }}
+          />
+        ) : null}
+        {popover === 'brand' ? (
+          <BrandKitPopover
+            useBrandLogo={useBrandLogo}
+            useBrandName={useBrandName}
+            useBrandColors={useBrandColors}
+            onToggleBrandLogo={setUseBrandLogo}
+            onToggleBrandName={setUseBrandName}
+            onToggleBrandColors={setUseBrandColors}
+            hasLogo={hasBrandLogo}
+            hasName={hasBrandName}
+            hasColors={hasBrandColors}
+          />
+        ) : null}
+        {popover === 'model' ? (
+          <ModelPopover
+            activeId={modelId}
+            onSelect={(id) => {
+              setModelId(id);
+              setPopover(null);
+            }}
+          />
+        ) : null}
+        {popover === 'format' ? (
+          <FormatPopover
+            activeId={aspectRatio}
+            onSelect={(id) => {
+              setAspectRatio(id);
+              setPopover(null);
+            }}
+          />
+        ) : null}
+        {popover === 'quality' ? (
+          <QualityCountPopover
+            quality={quality}
+            onSelectQuality={setQuality}
+            imageCount={imageCount}
+            onChangeImageCount={setImageCount}
+            variation={variation}
+            onSelectVariation={setVariation}
+          />
+        ) : null}
+        {popover === 'paste' ? (
+          <PastePopover
+            onPaste={() => {
+              setPopover(null);
+              void onPasteImage();
+            }}
+          />
+        ) : null}
+      </ComposerPopoverShell>
 
+      <Animated.View style={[styles.composerOverlay, composerOverlayStyle]}>
         <PlaygroundComposer
           prompt={prompt}
           onChangePrompt={setPrompt}
+          templateLockedPrompt={templateLockedPrompt}
+          onClearTemplateLock={clearTemplateLock}
           attachments={attachments}
           onRemoveAttachment={removeAttachment}
           onRetryAttachment={onRetryAttachment}
           aspectRatio={aspectRatio}
+          quality={quality}
+          imageCount={imageCount}
           popover={popover}
-          onPopoverChange={setPopover}
+          onPopoverChange={onPopoverChange}
+          onAddProduct={onAddProduct}
+          onAddReferenceOrTemplate={() =>
+            onPopoverChange(popover === 'referenceMenu' ? null : 'referenceMenu')
+          }
+          onLongPressReferenceAdd={() => onPopoverChange('paste')}
+          onSelectBrandKit={() => onPopoverChange(popover === 'brand' ? null : 'brand')}
+          brandKitActive={useBrandLogo || useBrandName || useBrandColors}
           enhancing={enhancing}
           onEnhance={() => void onEnhance()}
           sending={sending}
@@ -546,16 +747,35 @@ export default function AssistantScreen() {
           clipboardHasImage={clipboardHasImage}
           onLayout={(e) => setComposerHeight(e.nativeEvent.layout.height)}
         />
-      </KeyboardAvoidingView>
+      </Animated.View>
 
       <TemplatePickerSheet
         visible={templatePickerOpen}
         onClose={() => setTemplatePickerOpen(false)}
         onSelect={(template) => {
-          pickTemplateInPlayground(template);
           setTemplatePickerOpen(false);
-          toast(`Template “${template.title}” loaded`, 'success');
+          configureFlow.open(template);
         }}
+      />
+
+      <ReferenceLibrarySheet
+        visible={assetsSheetOpen}
+        onClose={() => setAssetsSheetOpen(false)}
+      />
+
+      <ReferenceLibrarySheet
+        visible={productSheetOpen}
+        onClose={() => setProductSheetOpen(false)}
+        targetKind="product"
+        title="Product Images"
+      />
+
+      <TemplateConfigureSheet
+        visible={configureFlow.visible}
+        template={configureFlow.template}
+        config={configureFlow.config}
+        onFinish={configureFlow.finish}
+        onCancel={configureFlow.cancel}
       />
 
       <PlanPickerSheet
@@ -563,6 +783,13 @@ export default function AssistantScreen() {
         onClose={() => setPlansOpen(false)}
         currentPlanId={currentPlanId}
         onSelectPlan={onSelectPlan}
+      />
+
+      <SelectImagesSheet
+        visible={selectSheet !== null}
+        onClose={() => setSelectSheet(null)}
+        urls={selectSheet?.urls ?? []}
+        mode={selectSheet?.mode ?? 'save'}
       />
     </AppScreen>
   );
@@ -574,6 +801,12 @@ const styles = StyleSheet.create({
   },
   flex: {
     flex: 1,
+  },
+  composerOverlay: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
   },
   listContent: {
     paddingHorizontal: 16,

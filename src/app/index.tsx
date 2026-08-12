@@ -7,9 +7,11 @@ import { useSession } from '@/hooks/use-session';
  * Entry redirect — AuthProvider also gates; this covers the initial `/` hit.
  */
 export default function Index() {
-  const { isHydrated, session, onboardingCompleted } = useSession();
+  const { isHydrated, isProfileReady, session, onboardingCompleted } = useSession();
 
-  if (!isHydrated) {
+  // Wait for the just-signed-in session's profile to sync too, or a
+  // returning user with onboarding already complete briefly flashes onboarding.
+  if (!isHydrated || (session && !isProfileReady)) {
     return (
       <View style={styles.boot}>
         <ActivityIndicator size="large" color="#208AEF" />

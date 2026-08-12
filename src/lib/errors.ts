@@ -1,7 +1,7 @@
 /**
  * Map provider / network failures to short user-facing copy.
  */
-export function toUserErrorMessage(error: unknown, fallback = 'Something went wrong'): string {
+export function toUserErrorMessage(error: unknown, fallback = 'An error occurred'): string {
   const raw =
     error instanceof Error
       ? error.message
@@ -44,7 +44,8 @@ export function toUserErrorMessage(error: unknown, fallback = 'Something went wr
     return 'Session expired. Sign in again to continue.';
   }
 
-  return raw || fallback;
+  // Unrecognized error — never surface the raw provider/network/stack text to the user.
+  return fallback;
 }
 
 /** Credit / subscription blockers that should open the plans sheet. */

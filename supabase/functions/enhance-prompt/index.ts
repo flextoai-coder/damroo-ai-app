@@ -5,6 +5,23 @@ import { checkPromptContent } from '../_shared/content-filter.ts';
 import { corsHeaders, errorResponse, jsonResponse } from '../_shared/cors.ts';
 import { getServiceClient, requireUser } from '../_shared/supabase.ts';
 
+type EnhanceBody = {
+  prompt?: string;
+  aspect_ratio?: string;
+  /** Ordered reference image URLs — the enhancer sees these, it doesn't just read their captions. */
+  reference_images?: string[];
+  /** Per-generation brand kit toggles. Off by default when omitted. */
+  use_brand_logo?: boolean;
+  use_brand_name?: boolean;
+  use_brand_colors?: boolean;
+};
+
+type ChatContentPart =
+  | { type: 'text'; text: string }
+  | { type: 'image_url'; image_url: { url: string } };
+
+const MAX_VISION_IMAGES = 4;
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders });
@@ -22,8 +39,8 @@ Deno.serve(async (req) => {
   }
 
   try {
-    const { prompt } = (await req.json()) as { prompt?: string };
-    const trimmed = prompt?.trim() ?? '';
+    const body = (await req.json()) as EnhanceBody;
+    const trimmed = body.prompt?.trim() ?? '';
     if (!trimmed) return errorResponse('prompt is required');
 
     const contentCheck = checkPromptContent(trimmed);
@@ -36,9 +53,32 @@ Deno.serve(async (req) => {
     const apiKey = Deno.env.get('OPENAI_API_KEY');
     if (!apiKey) return errorResponse('OPENAI_API_KEY is not configured', 500);
 
+    const aspectRatio = body.aspect_ratio?.trim() || null;
+    const referenceImages = (body.reference_images ?? []).filter(Boolean).slice(0, MAX_VISION_IMAGES);
+    const useBrandLogo = body.use_brand_logo === true;
+    const useBrandName = body.use_brand_name === true;
+    const useBrandColors = body.use_brand_colors === true;
+
     const service = getServiceClient();
-    const brandContext = await loadBrandPromptContext(service, userId);
-    const promptWithBrand = withBrandContext(trimmed, brandContext);
+    const brandContext = await loadBrandPromptContext(service, userId, {
+      includeName: useBrandName,
+      includeColors: useBrandColors,
+      includeLogo: useBrandLogo,
+    });
+
+    let textBlock = trimmed;
+    if (aspectRatio) {
+      textBlock += `\n\nTarget aspect ratio: ${aspectRatio}.`;
+    }
+    if (referenceImages.length > 0) {
+      textBlock += `\n\n${referenceImages.length} reference image(s) are attached below — use them as visual guidance (style, subject, composition) when enhancing the prompt.`;
+    }
+    textBlock = withBrandContext(textBlock, brandContext);
+
+    const contentParts: ChatContentPart[] = [{ type: 'text', text: textBlock }];
+    for (const url of referenceImages) {
+      contentParts.push({ type: 'image_url', image_url: { url } });
+    }
 
     const res = await fetch('https://api.openai.com/v1/chat/completions', {
       method: 'POST',
@@ -53,9 +93,9 @@ Deno.serve(async (req) => {
           {
             role: 'system',
             content:
-              'You enhance image-generation prompts for Indian SMB marketing creatives (posters, stories, offers). Keep the user intent, weave in the brand kit colors/tone/typography when provided, and add lighting, composition, and brand-safe detail. Return only the improved prompt text — no quotes or preamble.',
+              "You enhance image-generation prompts for Indian SMB marketing creatives (posters, stories, offers). Use whatever context is given — the user's minimal prompt, any attached reference image(s), the target aspect ratio, and any brand kit instructions — to write a single, richer prompt. Keep the user's core intent. If reference images are attached, describe how the new image should relate to them (style, subject, composition) rather than ignoring them. If brand kit instructions are present, weave them in exactly as specified — do not invent additional brand details beyond what's given. Add lighting, composition, and material/texture detail appropriate for a premium marketing creative. Return only the improved prompt text — no quotes, no preamble, no explanation.",
           },
-          { role: 'user', content: promptWithBrand },
+          { role: 'user', content: contentParts },
         ],
       }),
     });

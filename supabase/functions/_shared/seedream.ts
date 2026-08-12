@@ -42,9 +42,21 @@ export async function callSeedream(params: {
   const model = Deno.env.get('ARK_MODEL') ?? DEFAULT_MODEL;
   const size = sizeForAspect(params.aspectRatio, params.quality);
 
+  // Ark's `sequential_image_generation` mode lets the model decide how to
+  // satisfy a multi-image request — without a blunt, front-loaded directive
+  // it can "satisfy" the count by packing several looks into one collaged
+  // frame instead of returning N independent images. Stating the count in
+  // plain terms right at the start of the prompt (highest-attention
+  // position) fixes that; `withVariationContext` restates it again near the
+  // end for redundancy, but this is the instruction that actually lands.
+  const sequentialDirective =
+    params.imageCount > 1
+      ? `Generate exactly ${params.imageCount} separate images for this one request — each a complete, independent, single full-frame image. Do not combine them into one collage, grid, split-screen, or side-by-side comparison frame.\n\n`
+      : '';
+
   const body: Record<string, unknown> = {
     model,
-    prompt: `${params.prompt}\n\nAspect ratio: ${params.aspectRatio}.`,
+    prompt: `${sequentialDirective}${params.prompt}\n\nAspect ratio: ${params.aspectRatio}.`,
     size,
     response_format: 'url',
     watermark: false,

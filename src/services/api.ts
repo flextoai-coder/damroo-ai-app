@@ -26,7 +26,7 @@ export async function invokeFunction<TResponse>(
           throw new Error(payload.error ?? error.message);
         } catch (inner) {
           if (inner instanceof Error && inner.message !== error.message) {
-            throw new Error(toUserErrorMessage(inner, error.message));
+            throw new Error(toUserErrorMessage(inner));
           }
         }
       }

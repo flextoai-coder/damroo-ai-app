@@ -17,10 +17,14 @@ export type AssistantTurn = {
   role: 'assistant';
   status: 'loading' | 'done' | 'error';
   aspectRatio: string;
-  /** Durable preview URL when generation completes. */
-  imageUrl: string | null;
+  /** How many images were requested — sizes the loading skeleton before any results exist. */
+  imageCount: number;
+  /** Durable preview URLs once generation completes, in the order the provider returned them. */
+  imageUrls: string[];
   generationId: string | null;
   error: string | null;
+  /** Whether the brand kit (logo/name/colors) was actually used for this generation. */
+  brandKitApplied: boolean;
   /** Links back to the user turn that spawned this response. */
   parentUserId: string;
   createdAt: string;

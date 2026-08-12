@@ -2,7 +2,6 @@ import { LinearGradient } from 'expo-linear-gradient';
 import type { ReactNode } from 'react';
 import {
   ActivityIndicator,
-  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -14,6 +13,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { ChevronLeftIcon } from '@/components/onboarding/icons';
 import { OnboardingCanvas } from '@/components/onboarding/onboarding-canvas';
+import { AppScreen } from '@/components/shell/app-screen';
 import { brand } from '@/constants/brand';
 
 type OnboardingShellProps = {
@@ -52,15 +52,15 @@ export function OnboardingShell({
   const busy = primaryLoading || skipLoading;
 
   return (
-    <View style={styles.root}>
+    <AppScreen edges={[]}>
       <OnboardingCanvas />
 
       <KeyboardAvoidingView
         style={[
           styles.content,
           {
-            paddingTop: Platform.OS === 'android' ? 10 : insets.top + 8,
-            paddingBottom: Platform.OS === 'android' ? 12 : insets.bottom + 12,
+            paddingTop: insets.top + 8,
+            paddingBottom: insets.bottom + 28,
           },
         ]}
         behavior="padding">
@@ -157,15 +157,11 @@ export function OnboardingShell({
           </Pressable>
         </View>
       </KeyboardAvoidingView>
-    </View>
+    </AppScreen>
   );
 }
 
 const styles = StyleSheet.create({
-  root: {
-    flex: 1,
-    backgroundColor: brand.canvasBottom,
-  },
   content: {
     flex: 1,
     paddingHorizontal: 26,

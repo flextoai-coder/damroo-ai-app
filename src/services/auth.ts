@@ -10,6 +10,7 @@ import {
 } from '@/lib/auth-redirect';
 import { supabase } from '@/lib/supabase';
 import { invokeFunction } from '@/services/api';
+import { logOutRevenueCat } from '@/services/purchases';
 
 WebBrowser.maybeCompleteAuthSession();
 
@@ -216,6 +217,7 @@ export async function signInWithApple() {
 }
 
 export async function signOut() {
+  await logOutRevenueCat();
   const { error } = await supabase.auth.signOut();
   if (error) {
     throw error;
@@ -229,6 +231,7 @@ export async function signOut() {
  */
 export async function deleteAccount() {
   await invokeFunction('delete-account');
+  await logOutRevenueCat();
   await supabase.auth.signOut();
 }
 
@@ -257,7 +260,8 @@ function mapAuthError(error: { message?: string; status?: number }, fallback: st
     return 'Please confirm your email before signing in';
   }
 
-  return error.message?.trim() || fallback;
+  // Unrecognized error — never surface the raw Supabase/GoTrue error text to the user.
+  return fallback;
 }
 
 /** Email/password sign-in via Supabase Auth. */

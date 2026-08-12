@@ -1,12 +1,13 @@
+import { useQueryClient } from '@tanstack/react-query';
 import { BlurView } from 'expo-blur';
 import { Image } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
-import { useRouter, type Href } from 'expo-router';
-import { useQueryClient } from '@tanstack/react-query';
-import { useState } from 'react';
+import { useRouter, useScrollToTop, type Href } from 'expo-router';
+import { useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
+  Platform,
   Pressable,
   RefreshControl,
   ScrollView,
@@ -18,6 +19,7 @@ import {
 import { BrandKitShortcut } from '@/components/profile/brand-kit-shortcut';
 import {
   BuildingIcon,
+  CancelSubscriptionIcon,
   EditPencilIcon,
   GlobeIcon,
   PersonIcon,
@@ -36,16 +38,27 @@ import { useTabScreenPadding } from '@/hooks/use-screen-padding';
 import { useSession } from '@/hooks/use-session';
 import { planDisplayName, useSubscription } from '@/hooks/use-subscription';
 import { useTabBarScroll } from '@/hooks/use-tab-bar-scroll';
+import { toUserErrorMessage } from '@/lib/errors';
+import { resizedImageUrl } from '@/lib/image-transform';
 import { deleteAccount, signOut } from '@/services/auth';
 import { fetchProfile } from '@/services/profile';
+import {
+  isUserCancelledPurchase,
+  manageSubscription,
+  purchaseErrorMessage,
+  purchasePlan,
+} from '@/services/purchases';
 import { useAuthStore } from '@/stores/auth-store';
 import { useChatComposerStore } from '@/stores/chat-composer-store';
 import { useOnboardingStore } from '@/stores/onboarding-store';
 import { usePlaygroundStore } from '@/stores/playground-store';
+import { toast } from '@/stores/toast-store';
 
 export default function ProfileScreen() {
   const router = useRouter();
   const queryClient = useQueryClient();
+  const scrollRef = useRef<ScrollView>(null);
+  useScrollToTop(scrollRef);
   const scrollProps = useTabBarScroll();
   const screenPadding = useTabScreenPadding();
   const { profile, user } = useSession();
@@ -75,19 +88,46 @@ export default function ProfileScreen() {
 
   const subscription = subscriptionQuery.data;
   const isPaid = subscription?.status === 'active';
-  const planLabel = isPaid ? planDisplayName(subscription.plan) : 'Free plan';
-  const creditsLeft = isPaid ? subscription.credits_remaining : 5;
+  const planLabel = isPaid ? planDisplayName(subscription.plan) : 'No active plan';
+  const creditsLeft = isPaid ? subscription.credits_remaining : 0;
   const planBillingValue = isPaid
     ? `${planDisplayName(subscription.plan)} · ${creditsLeft} credits left`
-    : `Free · ${creditsLeft} generations left`;
+    : 'No active plan';
 
   const openPlans = () => {
     setPlansOpen(true);
   };
 
-  const onSelectPlan = (_plan: Plan) => {
+  const onSelectPlan = async (plan: Plan) => {
     setPlansOpen(false);
-    router.push('/(onboarding)/subscription' as Href);
+    try {
+      await purchasePlan(plan.id);
+      await subscriptionQuery.refetch();
+      toast(`You're on ${plan.name} now!`, 'success');
+    } catch (e) {
+      if (isUserCancelledPurchase(e)) return;
+      toast(purchaseErrorMessage(e), 'error');
+    }
+  };
+
+  const onCancelSubscription = async () => {
+    try {
+      await manageSubscription();
+    } catch (e) {
+      toast(toUserErrorMessage(e, 'Couldn’t open subscription management'), 'error');
+    }
+  };
+
+  const confirmCancelSubscription = () => {
+    const store = Platform.OS === 'ios' ? 'App Store' : 'Play Store';
+    Alert.alert(
+      'Cancel subscription?',
+      `This opens the ${store}, where you manage or cancel your Damroo subscription — Apple and Google require cancellation to go through their own subscription settings.`,
+      [
+        { text: 'Not now', style: 'cancel' },
+        { text: 'Continue', onPress: () => void onCancelSubscription() },
+      ],
+    );
   };
 
   const currentPlanId =
@@ -104,7 +144,8 @@ export default function ProfileScreen() {
     try {
       await signOut();
     } catch (e) {
-      Alert.alert('Sign out failed', e instanceof Error ? e.message : 'Try again');
+      if (__DEV__) console.error('[profile] Sign out error:', e);
+      Alert.alert('Sign out failed', 'An error occurred');
     } finally {
       setSigningOut(false);
     }
@@ -127,7 +168,8 @@ export default function ProfileScreen() {
       usePlaygroundStore.getState().clear();
       useAuthStore.getState().reset();
     } catch (e) {
-      Alert.alert('Delete account failed', e instanceof Error ? e.message : 'Try again');
+      if (__DEV__) console.error('[profile] Delete account error:', e);
+      Alert.alert('Delete account failed', 'An error occurred');
     } finally {
       setDeletingAccount(false);
     }
@@ -168,6 +210,7 @@ export default function ProfileScreen() {
   return (
     <AppScreen edges={[]} glowBlobs contentStyle={styles.screen}>
       <ScrollView
+        ref={scrollRef}
         {...scrollProps}
         style={styles.scroll}
         contentContainerStyle={[styles.content, screenPadding]}
@@ -202,7 +245,11 @@ export default function ProfileScreen() {
             style={styles.avatarRing}>
             <View style={styles.avatarInner}>
               {avatarUrl ? (
-                <Image source={{ uri: avatarUrl }} style={styles.avatarImage} contentFit="cover" />
+                <Image
+                  source={{ uri: resizedImageUrl(avatarUrl, { width: 64, height: 64 }) }}
+                  style={styles.avatarImage}
+                  contentFit="cover"
+                />
               ) : (
                 <Text style={styles.avatarInitials}>{initials || 'D'}</Text>
               )}
@@ -285,8 +332,19 @@ export default function ProfileScreen() {
             label="Billing history"
             value="No invoices yet"
             onPress={() => comingSoon('Billing history')}
-            last
+            last={!isPaid}
           />
+          {isPaid ? (
+            <ProfileRow
+              icon={<CancelSubscriptionIcon />}
+              iconTone="rgba(254, 226, 226, 0.85)"
+              label="Cancel subscription"
+              value={`Manage in the ${Platform.OS === 'ios' ? 'App Store' : 'Play Store'}`}
+              onPress={confirmCancelSubscription}
+              showChevron={false}
+              last
+            />
+          ) : null}
         </ProfileSection>
 
         {/* 7. Sign out */}
@@ -319,7 +377,7 @@ export default function ProfileScreen() {
               deletingAccount && styles.deleteBtnDisabled,
             ]}>
             {deletingAccount ? (
-              <ActivityIndicator color="#FFFFFF" />
+              <ActivityIndicator color="#B91C1C" />
             ) : (
               <Text style={styles.deleteLabel}>Delete account</Text>
             )}
@@ -362,7 +420,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   identity: {
-    marginTop: 12,
+    marginTop: 14,
     paddingHorizontal: 22,
     flexDirection: 'row',
     alignItems: 'center',
@@ -460,22 +518,20 @@ const styles = StyleSheet.create({
     color: '#B91C1C',
   },
   deleteBtn: {
-    marginTop: 12,
-    minHeight: 52,
-    borderRadius: 16,
+    marginTop: 28,
+    minHeight: 36,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#B91C1C',
   },
   deleteBtnPressed: {
-    opacity: 0.85,
+    opacity: 0.6,
   },
   deleteBtnDisabled: {
-    opacity: 0.7,
+    opacity: 0.5,
   },
   deleteLabel: {
-    fontSize: 16,
-    fontWeight: '800',
-    color: '#FFFFFF',
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#B91C1C',
   },
 });

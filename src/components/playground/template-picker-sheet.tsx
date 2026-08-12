@@ -1,7 +1,6 @@
 import { BlurView } from 'expo-blur';
 import { useEffect, useState } from 'react';
 import {
-  ActivityIndicator,
   Modal,
   Pressable,
   ScrollView,
@@ -24,6 +23,7 @@ import { PosterCard } from '@/components/home/poster-card';
 import { TemplatesEmptyState } from '@/components/templates/empty-state';
 import { TemplateFilterChips } from '@/components/templates/filter-chips';
 import { TemplateSearchBar } from '@/components/templates/search-bar';
+import { SkeletonGrid } from '@/components/ui/skeleton';
 import { brand } from '@/constants/brand';
 import { SHEET_SPRING } from '@/constants/sheet-motion';
 import type { TemplateIndustryFilter } from '@/constants/templates';
@@ -150,11 +150,7 @@ export function TemplatePickerSheet({ visible, onClose, onSelect }: TemplatePick
             <View style={styles.header}>
               <View style={styles.headerCopy}>
                 <Text style={styles.title}>Templates</Text>
-                <Text style={styles.subtitle}>Tap a design to use it in Playground</Text>
               </View>
-              <Pressable onPress={dismiss} style={styles.closeBtn} accessibilityLabel="Close">
-                <Text style={styles.closeLabel}>Close</Text>
-              </Pressable>
             </View>
 
             <TemplateSearchBar value={search} onChangeText={setSearch} />
@@ -165,9 +161,9 @@ export function TemplatePickerSheet({ visible, onClose, onSelect }: TemplatePick
             />
 
             {isLoading ? (
-              <View style={styles.loader}>
-                <ActivityIndicator color={brand.orange} />
-              </View>
+              <ScrollView contentContainerStyle={styles.gridContent}>
+                <SkeletonGrid screenWidth={width} itemHeight={196} count={4} />
+              </ScrollView>
             ) : isError ? (
               <View style={styles.loader}>
                 <Text style={styles.errorText}>Couldn’t load templates.</Text>
@@ -191,7 +187,7 @@ export function TemplatePickerSheet({ visible, onClose, onSelect }: TemplatePick
                         variant="grid"
                         title={template.title}
                         industry={template.industry}
-                        ribbon={template.source}
+                        ribbon={template.source === 'official' ? null : template.source}
                         previewPath={template.preview_storage_path}
                         onPress={() => onSelect(template)}
                       />
@@ -261,17 +257,6 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '500',
     color: brand.muted,
-  },
-  closeBtn: {
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 999,
-    backgroundColor: 'rgba(255,255,255,0.7)',
-  },
-  closeLabel: {
-    fontSize: 13,
-    fontWeight: '800',
-    color: brand.orangeDeep,
   },
   loader: {
     flex: 1,

@@ -1,8 +1,8 @@
+import { useQuery } from '@tanstack/react-query';
 import { BlurView } from 'expo-blur';
 import { Image } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter, type Href } from 'expo-router';
-import { useQuery } from '@tanstack/react-query';
 import { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
@@ -25,11 +25,13 @@ import Animated, {
 } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { SkeletonGrid } from '@/components/ui/skeleton';
 import { brand } from '@/constants/brand';
 import { SHEET_SPRING } from '@/constants/sheet-motion';
 import { useSession } from '@/hooks/use-session';
 import { track } from '@/lib/analytics';
 import { toUserErrorMessage } from '@/lib/errors';
+import { resizedImageUrl } from '@/lib/image-transform';
 import {
   fetchGenerationsForCaptioning,
   primaryAssetUrl,
@@ -54,7 +56,7 @@ export function CaptionPickerSheet({ visible, onClose }: CaptionPickerSheetProps
   const { width, height } = useWindowDimensions();
   const router = useRouter();
   const { user, profile } = useSession();
-  const [hideCaptioned, setHideCaptioned] = useState(false);
+  const [hideCaptioned, setHideCaptioned] = useState(true);
   const [busyId, setBusyId] = useState<string | null>(null);
 
   const query = useQuery({
@@ -81,7 +83,7 @@ export function CaptionPickerSheet({ visible, onClose }: CaptionPickerSheetProps
 
   useEffect(() => {
     if (!visible) {
-      setHideCaptioned(false);
+      setHideCaptioned(true);
       setBusyId(null);
       translateY.value = sheetHeight;
       return;
@@ -187,11 +189,7 @@ export function CaptionPickerSheet({ visible, onClose }: CaptionPickerSheetProps
             <View style={styles.header}>
               <View style={styles.headerCopy}>
                 <Text style={styles.title}>Generate captions</Text>
-                <Text style={styles.subtitle}>Pick a generation to write a caption for</Text>
               </View>
-              <Pressable onPress={dismiss} style={styles.closeBtn} accessibilityLabel="Close">
-                <Text style={styles.closeLabel}>Close</Text>
-              </Pressable>
             </View>
 
             <Pressable
@@ -201,8 +199,9 @@ export function CaptionPickerSheet({ visible, onClose }: CaptionPickerSheetProps
               accessibilityState={{ checked: hideCaptioned }}
               accessibilityLabel="Hide already captioned">
               <View style={styles.toggleCopy}>
-                <Text style={styles.toggleTitle}>Hide already captioned</Text>
-                <Text style={styles.toggleSubtitle}>Only show generations that still need one</Text>
+                <Text style={styles.toggleTitle}>
+                  {hideCaptioned ? 'Captioned images are hidden' : 'Hide already captioned'}
+                </Text>
               </View>
               <Switch
                 value={hideCaptioned}
@@ -214,9 +213,9 @@ export function CaptionPickerSheet({ visible, onClose }: CaptionPickerSheetProps
             </Pressable>
 
             {query.isLoading ? (
-              <View style={styles.loader}>
-                <ActivityIndicator color={brand.orange} />
-              </View>
+              <ScrollView contentContainerStyle={styles.gridContent}>
+                <SkeletonGrid screenWidth={width} itemHeight={colWidth} showLabel={false} />
+              </ScrollView>
             ) : query.isError ? (
               <View style={styles.loader}>
                 <Text style={styles.errorText}>Couldn’t load your generations.</Text>
@@ -276,7 +275,11 @@ function GenerationTile({
       accessibilityRole="button"
       accessibilityLabel={generation.prompt}>
       {url ? (
-        <Image source={{ uri: url }} style={styles.tileImage} contentFit="cover" />
+        <Image
+          source={{ uri: resizedImageUrl(url, { width, height: width }) }}
+          style={styles.tileImage}
+          contentFit="cover"
+        />
       ) : (
         <LinearGradient colors={[brand.creamDeep, brand.orangeSoft]} style={styles.tileImage} />
       )}
@@ -347,17 +350,6 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '500',
     color: brand.muted,
-  },
-  closeBtn: {
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 999,
-    backgroundColor: 'rgba(255,255,255,0.7)',
-  },
-  closeLabel: {
-    fontSize: 13,
-    fontWeight: '800',
-    color: brand.orangeDeep,
   },
   toggleRow: {
     marginTop: 14,

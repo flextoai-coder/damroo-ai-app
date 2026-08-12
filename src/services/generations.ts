@@ -32,6 +32,46 @@ export async function fetchUserGenerations(
   }));
 }
 
+export type GenerationsPage = {
+  items: Generation[];
+  nextCursor: string | null;
+};
+
+/** Cursor-paginated version of fetchUserGenerations, for infinite-scroll feeds. */
+export async function fetchUserGenerationsPage(
+  userId: string,
+  options: { limit?: number; cursor?: string | null } = {},
+): Promise<GenerationsPage> {
+  const limit = options.limit ?? 20;
+
+  let query = supabase
+    .from('generations')
+    .select('*, generation_assets(*)')
+    .eq('user_id', userId)
+    .eq('status', 'completed')
+    .order('created_at', { ascending: false })
+    .limit(limit);
+
+  if (options.cursor) {
+    query = query.lt('created_at', options.cursor);
+  }
+
+  const { data, error } = await query;
+  if (error) {
+    throw error;
+  }
+
+  const items = (data ?? []).map((row) => ({
+    ...row,
+    generation_assets: [...(row.generation_assets ?? [])].sort(
+      (a, b) => a.sort_order - b.sort_order,
+    ),
+  }));
+
+  const nextCursor = items.length === limit ? items[items.length - 1].created_at : null;
+  return { items, nextCursor };
+}
+
 export function primaryAssetUrl(generation: Generation): string | null {
   const asset = generation.generation_assets[0];
   return asset?.public_url ?? null;

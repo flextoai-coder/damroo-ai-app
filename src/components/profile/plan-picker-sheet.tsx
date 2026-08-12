@@ -27,6 +27,7 @@ import Animated, {
 } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { CloseIcon } from '@/components/playground/icons';
 import { CheckIcon, CrownIcon } from '@/components/profile/icons';
 import { brand } from '@/constants/brand';
 import { formatPlanPrice, PLANS, type Plan, type PlanId } from '@/constants/plans';
@@ -42,8 +43,10 @@ const INACTIVE_SCALE = 0.86;
 type PlanPickerSheetProps = {
   visible: boolean;
   onClose: () => void;
-  /** Currently active subscription plan, if any. */
+  /** Currently active subscription plan, if any. Marked "Active" and not selectable. */
   currentPlanId?: PlanId | null;
+  /** Plan the carousel opens scrolled to. Defaults to currentPlanId, else Growth. */
+  initialPlanId?: PlanId | null;
   onSelectPlan: (plan: Plan) => void;
 };
 
@@ -51,6 +54,7 @@ export function PlanPickerSheet({
   visible,
   onClose,
   currentPlanId = null,
+  initialPlanId = null,
   onSelectPlan,
 }: PlanPickerSheetProps) {
   const insets = useSafeAreaInsets();
@@ -79,10 +83,11 @@ export function PlanPickerSheet({
       return;
     }
 
-    const startIndex = currentPlanId
+    const targetPlanId = initialPlanId ?? currentPlanId;
+    const startIndex = targetPlanId
       ? Math.max(
           0,
-          PLANS.findIndex((p) => p.id === currentPlanId),
+          PLANS.findIndex((p) => p.id === targetPlanId),
         )
       : 1;
     const safeIndex = startIndex >= 0 ? startIndex : 1;
@@ -97,7 +102,7 @@ export function PlanPickerSheet({
         animated: false,
       });
     });
-  }, [visible, sheetHeight, translateY, currentPlanId, snapInterval, scrollX]);
+  }, [visible, sheetHeight, translateY, currentPlanId, initialPlanId, snapInterval, scrollX]);
 
   const finishClose = () => {
     onClose();
@@ -187,6 +192,15 @@ export function PlanPickerSheet({
                 <View style={styles.handle} />
               </Animated.View>
             </GestureDetector>
+
+            <Pressable
+              onPress={dismiss}
+              hitSlop={10}
+              style={styles.closeBtn}
+              accessibilityRole="button"
+              accessibilityLabel="Close">
+              <CloseIcon size={13} color={brand.muted} />
+            </Pressable>
 
             <View style={styles.header}>
               <Text style={styles.title}>Choose your plan</Text>
@@ -392,6 +406,17 @@ const styles = StyleSheet.create({
     height: 4,
     borderRadius: 2,
     backgroundColor: 'rgba(148,163,184,0.55)',
+  },
+  closeBtn: {
+    position: 'absolute',
+    top: 14,
+    right: 18,
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(148,163,184,0.16)',
   },
   header: {
     paddingHorizontal: 22,

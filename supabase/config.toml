@@ -21,17 +21,11 @@ verify_jwt = true
 [functions.generate-caption]
 verify_jwt = true
 
-[functions.create-razorpay-order]
-verify_jwt = true
-
-[functions.verify-apple-iap]
-verify_jwt = true
-
 [functions.delete-account]
 verify_jwt = true
 
-# Webhook + cron use custom auth (signature / CRON_SECRET)
-[functions.razorpay-webhook]
+# Webhook + cron use custom auth (Authorization header / CRON_SECRET)
+[functions.revenuecat-webhook]
 verify_jwt = false
 
 [functions.cron-expire-subscriptions]

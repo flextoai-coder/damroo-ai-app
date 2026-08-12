@@ -3,7 +3,6 @@ import { useRouter } from 'expo-router';
 import { useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
-  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -116,8 +115,8 @@ export default function EditProfileScreen() {
           contentContainerStyle={[
             styles.content,
             {
-              paddingTop: Platform.OS === 'android' ? 10 : insets.top + 8,
-              paddingBottom: Platform.OS === 'android' ? 28 : insets.bottom + 28,
+              paddingTop: insets.top + 8,
+              paddingBottom: insets.bottom + 28,
             },
           ]}>
           <View style={styles.topRow}>

@@ -5,24 +5,19 @@ type BrandKitRow = {
   secondary_color: string | null;
   accent_color: string | null;
   font_style: string | null;
-  tone_of_voice: string | null;
-  brand_keywords: string | null;
-  style_notes: string | null;
   logo_storage_path: string | null;
 };
 
 type ProfileBrandRow = {
   business_name: string | null;
-  industry: string | null;
-  business_details: string | null;
 };
 
 export type BrandContextOptions = {
-  /** Mention the business name in the prompt. Defaults to true. */
+  /** Add the brand name, styled per the configured typography. Nothing else. */
   includeName?: boolean;
-  /** Mention brand colors in the prompt. Defaults to true. */
+  /** Apply the brand color palette. Nothing else. */
   includeColors?: boolean;
-  /** Mention that a brand logo reference may be provided. Defaults to true. */
+  /** Mention the attached brand logo reference and how to place it. Nothing else. */
   includeLogo?: boolean;
 };
 
@@ -33,12 +28,12 @@ export async function loadBrandPromptContext(
   options: BrandContextOptions = {},
 ): Promise<string | null> {
   const [{ data: profile }, { data: kit }] = await Promise.all([
+    service.from('profiles').select('business_name').eq('id', userId).maybeSingle(),
     service
-      .from('profiles')
-      .select('business_name, industry, business_details')
-      .eq('id', userId)
+      .from('brand_kits')
+      .select('primary_color, secondary_color, accent_color, font_style, logo_storage_path')
+      .eq('user_id', userId)
       .maybeSingle(),
-    service.from('brand_kits').select('*').eq('user_id', userId).maybeSingle(),
   ]);
 
   return formatBrandPromptContext(
@@ -48,22 +43,27 @@ export async function loadBrandPromptContext(
   );
 }
 
+/**
+ * Three independent brand identity toggles, each mapped to exactly one
+ * tightly-scoped instruction. All default off — no implicit extras (industry,
+ * tone of voice, keywords, etc.) get pulled in alongside them anymore.
+ */
 export function formatBrandPromptContext(
   profile: ProfileBrandRow | null,
   kit: BrandKitRow | null,
   options: BrandContextOptions = {},
 ): string | null {
-  const { includeName = true, includeColors = true, includeLogo = true } = options;
+  const { includeName = false, includeColors = false, includeLogo = false } = options;
   const lines: string[] = [];
 
   if (includeName && profile?.business_name?.trim()) {
-    lines.push(`Business: ${profile.business_name.trim()}`);
-  }
-  if (profile?.industry?.trim()) {
-    lines.push(`Industry: ${profile.industry.trim()}`);
-  }
-  if (profile?.business_details?.trim()) {
-    lines.push(`Business details: ${profile.business_details.trim()}`);
+    const name = profile.business_name.trim();
+    const typography = kit?.font_style?.trim();
+    lines.push(
+      typography
+        ? `Include the brand name "${name}" in the design, styled using ${typography} typography. Do not add any other business information.`
+        : `Include the brand name "${name}" in the design. Do not add any other business information.`,
+    );
   }
 
   if (includeColors) {
@@ -71,29 +71,18 @@ export function formatBrandPromptContext(
       .filter((c): c is string => Boolean(c?.trim()))
       .map((c) => c.trim().toUpperCase());
     if (colors.length) {
-      lines.push(`Brand colors (use these hex values in the design): ${colors.join(', ')}`);
+      lines.push(`Apply the brand color palette (hex): ${colors.join(', ')}.`);
     }
   }
-  if (kit?.font_style?.trim()) {
-    lines.push(`Typography style: ${kit.font_style.trim()}`);
-  }
-  if (kit?.tone_of_voice?.trim()) {
-    lines.push(`Brand voice / tone: ${kit.tone_of_voice.trim()}`);
-  }
-  if (kit?.brand_keywords?.trim()) {
-    lines.push(`Brand keywords: ${kit.brand_keywords.trim()}`);
-  }
-  if (kit?.style_notes?.trim()) {
-    lines.push(`Style notes: ${kit.style_notes.trim()}`);
-  }
+
   if (includeLogo && kit?.logo_storage_path?.trim()) {
     lines.push(
-      'A brand logo may be provided as a reference image — keep logo colors and mark consistent when relevant.',
+      'A brand logo has been provided as a reference image — find the best placement for it and align it naturally within the composition. Do not alter its appearance.',
     );
   }
 
   if (!lines.length) return null;
-  return `Brand kit (follow unless the user prompt conflicts):\n${lines.map((l) => `- ${l}`).join('\n')}`;
+  return `Brand kit instructions (follow exactly, in addition to the user's prompt):\n${lines.map((l) => `- ${l}`).join('\n')}`;
 }
 
 /** Append brand context to a generation / enhance prompt. */

@@ -4,7 +4,11 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { brand } from '@/constants/brand';
+import { resizedImageUrl } from '@/lib/image-transform';
 import { formatRelativeTime } from '@/lib/relative-time';
+
+/** Matches the imageWrap style below — card is 124 wide with 8px padding either side. */
+const RAIL_TILE_SIZE = { width: 108, height: 158 };
 
 type GenerationCardProps = {
   title: string;
@@ -31,7 +35,11 @@ export function GenerationCard({
         <View style={styles.inner}>
           <View style={styles.imageWrap}>
             {imageUrl ? (
-              <Image source={{ uri: imageUrl }} style={styles.image} contentFit="cover" />
+              <Image
+                source={{ uri: resizedImageUrl(imageUrl, RAIL_TILE_SIZE) }}
+                style={styles.image}
+                contentFit="cover"
+              />
             ) : (
               <LinearGradient
                 colors={[brand.orangeSoft, brand.creamDeep]}

@@ -28,32 +28,22 @@ export function TemplateFilterChips({ active, industries, onChange }: FilterChip
             ? chip.id === 'all'
             : chip.id !== 'all' && active.toLowerCase() === chip.id.toLowerCase();
 
-        if (isActive) {
-          return (
-            <Pressable
-              key={chip.id}
-              onPress={() => onChange(chip.id)}
-              accessibilityRole="button"
-              accessibilityState={{ selected: true }}>
-              <LinearGradient
-                colors={[brand.orange, brand.orangeDeep]}
-                start={{ x: 0, y: 0.5 }}
-                end={{ x: 1, y: 0.5 }}
-                style={[styles.chip, styles.chipActive]}>
-                <Text style={styles.activeLabel}>{chip.label}</Text>
-              </LinearGradient>
-            </Pressable>
-          );
-        }
-
         return (
           <Pressable
             key={chip.id}
             onPress={() => onChange(chip.id)}
-            style={[styles.chip, styles.chipIdle]}
+            style={[styles.chip, isActive ? styles.chipActive : styles.chipIdle]}
             accessibilityRole="button"
-            accessibilityState={{ selected: false }}>
-            <Text style={styles.idleLabel}>{chip.label}</Text>
+            accessibilityState={{ selected: isActive }}>
+            {isActive ? (
+              <LinearGradient
+                colors={[brand.orange, brand.orangeDeep]}
+                start={{ x: 0, y: 0.5 }}
+                end={{ x: 1, y: 0.5 }}
+                style={styles.chipFill}
+              />
+            ) : null}
+            <Text style={isActive ? styles.activeLabel : styles.idleLabel}>{chip.label}</Text>
           </Pressable>
         );
       })}
@@ -64,6 +54,8 @@ export function TemplateFilterChips({ active, industries, onChange }: FilterChip
 const styles = StyleSheet.create({
   rail: {
     marginTop: 14,
+    flexGrow: 0,
+    flexShrink: 0,
   },
   row: {
     paddingHorizontal: 22,
@@ -88,6 +80,14 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(255,255,255,0.55)',
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: 'rgba(255,255,255,0.95)',
+  },
+  chipFill: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    borderRadius: 999,
   },
   activeLabel: {
     color: '#FFFFFF',

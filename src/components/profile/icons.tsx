@@ -134,6 +134,15 @@ export function CardIcon({ size = 16, color = '#EA580C' }: IconProps) {
   );
 }
 
+export function CancelSubscriptionIcon({ size = 16, color = '#DC2626' }: IconProps) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Circle cx="12" cy="12" r="9" stroke={color} strokeWidth={1.8} />
+      <Path d="M9 9l6 6M15 9l-6 6" stroke={color} strokeWidth={1.8} strokeLinecap="round" />
+    </Svg>
+  );
+}
+
 export function ReceiptIcon({ size = 16, color = '#EA580C' }: IconProps) {
   return (
     <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">

@@ -39,6 +39,40 @@ export const PLAYGROUND_FORMATS: PlaygroundFormat[] = [
 
 export const DEFAULT_FORMAT_ID = '1:1';
 
+export type PlaygroundQuality = {
+  id: '2K' | '4K';
+  label: string;
+  description: string;
+};
+
+export const PLAYGROUND_QUALITIES: PlaygroundQuality[] = [
+  { id: '2K', label: '2K', description: 'Fast — great for most posts' },
+  { id: '4K', label: '4K', description: 'Sharper detail, takes a bit longer' },
+];
+
+export const MIN_IMAGE_COUNT = 1;
+export const MAX_IMAGE_COUNT = 4;
+
+export type PlaygroundVariation = {
+  id: 'subtle' | 'balanced' | 'bold';
+  label: string;
+  description: string;
+};
+
+/**
+ * How different each image in a multi-image batch should look from the
+ * others — only meaningful when generating more than one image at once.
+ * The product/reference subject's identity is never part of what varies;
+ * this only affects style, pose, camera angle, and composition.
+ */
+export const PLAYGROUND_VARIATIONS: PlaygroundVariation[] = [
+  { id: 'subtle', label: 'Subtle', description: 'Same look, minor tweaks' },
+  { id: 'balanced', label: 'Balanced', description: 'Different pose & angle' },
+  { id: 'bold', label: 'Bold', description: 'Distinct style each time' },
+];
+
+export const DEFAULT_VARIATION_ID: PlaygroundVariation['id'] = 'balanced';
+
 /** Rotating inspiration text shown on the empty Playground screen — not clickable. */
 export const PLAYGROUND_PROMPT_TIPS = [
   'Diwali offer poster for my cafe',

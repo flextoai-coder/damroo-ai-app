@@ -151,3 +151,37 @@ export function VideoModeIcon({ size = 14, color = '#9CA3AF' }: IconProps) {
     </Svg>
   );
 }
+
+/** Downward arrow into a tray — save to device gallery. */
+export function DownloadIcon({ size = 18, color = '#F97316', strokeWidth = 1.8 }: IconProps) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Path d="M12 4v11" stroke={color} strokeWidth={strokeWidth} strokeLinecap="round" />
+      <Path
+        d="M7.5 11.5L12 16l4.5-4.5"
+        stroke={color}
+        strokeWidth={strokeWidth}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <Path d="M5 18.5h14" stroke={color} strokeWidth={strokeWidth} strokeLinecap="round" />
+    </Svg>
+  );
+}
+
+/** Upward arrow out of a tray — share out of the app. */
+export function UploadIcon({ size = 18, color = '#FFFFFF', strokeWidth = 1.8 }: IconProps) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Path d="M12 16V5" stroke={color} strokeWidth={strokeWidth} strokeLinecap="round" />
+      <Path
+        d="M7.5 9.5L12 5l4.5 4.5"
+        stroke={color}
+        strokeWidth={strokeWidth}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <Path d="M5 18.5h14" stroke={color} strokeWidth={strokeWidth} strokeLinecap="round" />
+    </Svg>
+  );
+}

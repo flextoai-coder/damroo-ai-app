@@ -142,6 +142,11 @@ const styles = StyleSheet.create({
   root: {
     flex: 1,
     backgroundColor: brand.canvasBottom,
+    // Glow blobs deliberately bleed past this screen's own edge so they're
+    // invisible at rest — without this, that bleed gets exposed mid-slide
+    // during tab transitions (each screen translates as a rigid unit, so
+    // the overflow briefly re-enters the viewport from the other side).
+    overflow: 'hidden',
   },
   blobHost: {
     position: 'absolute',

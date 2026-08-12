@@ -2,7 +2,14 @@ export type PlanId = 'starter' | 'growth' | 'scale';
 
 export const PLANS: Record<
   PlanId,
-  { id: PlanId; name: string; priceInr: number; credits: number; appleProductId: string }
+  {
+    id: PlanId;
+    name: string;
+    priceInr: number;
+    credits: number;
+    appleProductId: string;
+    androidProductId: string;
+  }
 > = {
   starter: {
     id: 'starter',
@@ -10,6 +17,7 @@ export const PLANS: Record<
     priceInr: 5000,
     credits: 500,
     appleProductId: 'damroo_starter_monthly',
+    androidProductId: 'damroo_starter_monthly:monthly',
   },
   growth: {
     id: 'growth',
@@ -17,6 +25,7 @@ export const PLANS: Record<
     priceInr: 10000,
     credits: 1000,
     appleProductId: 'damroo_growth_monthly',
+    androidProductId: 'damroo_growth_monthly:monthly',
   },
   scale: {
     id: 'scale',
@@ -24,6 +33,7 @@ export const PLANS: Record<
     priceInr: 20000,
     credits: 2000,
     appleProductId: 'damroo_scale_monthly',
+    androidProductId: 'damroo_scale_monthly:monthly',
   },
 };
 
@@ -33,7 +43,10 @@ export function getPlan(id: string) {
   return plan;
 }
 
-export function planFromAppleProductId(productId: string): PlanId | null {
-  const entry = Object.values(PLANS).find((p) => p.appleProductId === productId);
+/** Matches a RevenueCat webhook `product_id` against either store's product identifier. */
+export function planFromProductId(productId: string): PlanId | null {
+  const entry = Object.values(PLANS).find(
+    (p) => p.appleProductId === productId || p.androidProductId === productId,
+  );
   return entry?.id ?? null;
 }

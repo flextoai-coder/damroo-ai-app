@@ -7,6 +7,7 @@ import { ActivityIndicator, StyleSheet, View } from 'react-native';
 import { brand } from '@/constants/brand';
 import { createSessionFromUrl } from '@/services/auth';
 import { ensureProfile } from '@/services/profile';
+import { configureRevenueCat } from '@/services/purchases';
 import { supabase } from '@/lib/supabase';
 import { useAuthStore } from '@/stores/auth-store';
 
@@ -25,6 +26,17 @@ export async function syncProfile(userId: string | undefined) {
     setProfile(profile);
   } catch {
     setProfile(null);
+    return;
+  }
+
+  try {
+    // Ties RevenueCat's app_user_id to this Supabase user for the webhook to
+    // match. Isolated from the profile try/catch above — a purchases-SDK
+    // failure (e.g. unavailable in Expo Go, or a bad key) must never wipe
+    // an otherwise-successful profile fetch.
+    configureRevenueCat(userId);
+  } catch {
+    // Purchases just won't work this session; nothing else should degrade.
   }
 }
 
@@ -36,7 +48,11 @@ export function AuthProvider({ children }: PropsWithChildren) {
   const isHydrated = useAuthStore((s) => s.isHydrated);
   const session = useAuthStore((s) => s.session);
   const onboardingCompleted = useAuthStore((s) => s.onboardingCompleted);
+  const isProfileReady = useAuthStore((s) => s.isProfileReady);
   const routingRef = useRef(false);
+  // Hydrated, and — whenever a session exists — its profile has synced, so
+  // onboardingCompleted is trustworthy before we route anywhere.
+  const readyToRoute = isHydrated && (!session || isProfileReady);
 
   // Hydrate session + subscribe to auth changes
   useEffect(() => {
@@ -96,7 +112,7 @@ export function AuthProvider({ children }: PropsWithChildren) {
 
   // Route gate
   useEffect(() => {
-    if (!isHydrated || routingRef.current) return;
+    if (!readyToRoute || routingRef.current) return;
 
     const root = segments[0];
     const inAuthGroup = root === '(auth)';
@@ -134,9 +150,9 @@ export function AuthProvider({ children }: PropsWithChildren) {
         });
       }
     }
-  }, [isHydrated, session, onboardingCompleted, segments, router]);
+  }, [readyToRoute, session, onboardingCompleted, segments, router]);
 
-  if (!isHydrated) {
+  if (!readyToRoute) {
     return (
       <View style={styles.boot}>
         <ActivityIndicator size="large" color="#208AEF" />

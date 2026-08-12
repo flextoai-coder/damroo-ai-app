@@ -1,7 +1,8 @@
 import { Image } from 'expo-image';
 import * as ImagePicker from 'expo-image-picker';
 import { LinearGradient } from 'expo-linear-gradient';
-import { useEffect, useState } from 'react';
+import { useScrollToTop } from 'expo-router';
+import { useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Pressable,
@@ -16,6 +17,7 @@ import {
 import { ColorField } from '@/components/brand-kit/color-field';
 import { MultiSelectField, SelectField } from '@/components/brand-kit/select-field';
 import { AppScreen } from '@/components/shell/app-screen';
+import { BrandKitSkeleton } from '@/components/ui/skeleton';
 import { brand } from '@/constants/brand';
 import {
   BRAND_FONT_SUGGESTIONS,
@@ -29,6 +31,7 @@ import { useTabScreenPadding } from '@/hooks/use-screen-padding';
 import { useSession } from '@/hooks/use-session';
 import { useTabBarScroll } from '@/hooks/use-tab-bar-scroll';
 import { toUserErrorMessage } from '@/lib/errors';
+import { resizedImageUrl } from '@/lib/image-transform';
 import { requestPhotoLibraryAccess } from '@/lib/media-permissions';
 import {
   brandLogoSignedUrl,
@@ -48,6 +51,8 @@ function typographyOptions(current: string): string[] {
 
 export default function BrandKitScreen() {
   const { user } = useSession();
+  const scrollRef = useRef<ScrollView>(null);
+  useScrollToTop(scrollRef);
   const scrollProps = useTabBarScroll();
   const screenPadding = useTabScreenPadding();
   const brandKitQuery = useBrandKit();
@@ -117,7 +122,7 @@ export default function BrandKitScreen() {
     setUploadingLogo(true);
     setError(null);
     try {
-      const kit = await uploadBrandLogo(user.id, result.assets[0].uri);
+      const kit = await uploadBrandLogo(user.id, result.assets[0].uri, result.assets[0].mimeType);
       setLogoPath(kit.logo_storage_path);
       setLogoUrl(await brandLogoSignedUrl(kit.logo_storage_path));
       toast('Logo uploaded', 'success');
@@ -146,6 +151,7 @@ export default function BrandKitScreen() {
   return (
     <AppScreen edges={[]} glowBlobs contentStyle={styles.screen}>
       <ScrollView
+        ref={scrollRef}
         {...scrollProps}
         style={styles.scroll}
         contentContainerStyle={[styles.content, screenPadding]}
@@ -159,14 +165,9 @@ export default function BrandKitScreen() {
           />
         }>
         <Text style={styles.title}>Brand Kit</Text>
-        <Text style={styles.subtitle}>
-          Colors, logo and voice used to steer your image prompts.
-        </Text>
 
         {brandKitQuery.isLoading ? (
-          <View style={styles.loader}>
-            <ActivityIndicator color={brand.orange} />
-          </View>
+          <BrandKitSkeleton />
         ) : (
           <>
             <View style={styles.previewCard}>
@@ -209,7 +210,11 @@ export default function BrandKitScreen() {
               <View style={styles.logoCard}>
                 <View style={styles.logoPreview}>
                   {logoUrl ? (
-                    <Image source={{ uri: logoUrl }} style={styles.logoImage} contentFit="contain" />
+                    <Image
+                      source={{ uri: resizedImageUrl(logoUrl, { width: 72 }) }}
+                      style={styles.logoImage}
+                      contentFit="contain"
+                    />
                   ) : (
                     <Text style={styles.logoPlaceholder}>No logo</Text>
                   )}
@@ -320,19 +325,8 @@ const styles = StyleSheet.create({
     color: brand.ink,
     letterSpacing: -0.5,
   },
-  subtitle: {
-    marginTop: 6,
-    marginBottom: 20,
-    fontSize: 14,
-    fontWeight: '500',
-    color: brand.muted,
-    lineHeight: 20,
-  },
-  loader: {
-    paddingTop: 48,
-    alignItems: 'center',
-  },
   previewCard: {
+    marginTop: 14,
     marginBottom: 22,
     borderRadius: 20,
     borderCurve: 'continuous',

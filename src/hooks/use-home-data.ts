@@ -1,8 +1,17 @@
-import { useQuery } from '@tanstack/react-query';
+import { useInfiniteQuery, useQuery } from '@tanstack/react-query';
 
-import { fetchUserGenerations } from '@/services/generations';
+import { fetchBanners } from '@/services/banners';
+import { fetchUserGenerations, fetchUserGenerationsPage } from '@/services/generations';
 import { fetchPublishedTemplates } from '@/services/templates';
 import { useSession } from '@/hooks/use-session';
+
+/** Home hero banners — bucket-driven, same for every user. */
+export function useHomeBanners() {
+  return useQuery({
+    queryKey: ['banners', 'home'],
+    queryFn: fetchBanners,
+  });
+}
 
 export function useHomeGenerations() {
   const { user } = useSession();
@@ -10,6 +19,22 @@ export function useHomeGenerations() {
   return useQuery({
     queryKey: ['generations', 'home', user?.id],
     queryFn: () => fetchUserGenerations(user!.id, { limit: 40 }),
+    enabled: Boolean(user?.id),
+  });
+}
+
+const GENERATIONS_PAGE_SIZE = 10;
+
+/** Cursor-paginated generations feed for the Home screen's "Load more" grid. */
+export function useInfiniteGenerations() {
+  const { user } = useSession();
+
+  return useInfiniteQuery({
+    queryKey: ['generations', 'infinite', user?.id],
+    queryFn: ({ pageParam }: { pageParam: string | null }) =>
+      fetchUserGenerationsPage(user!.id, { limit: GENERATIONS_PAGE_SIZE, cursor: pageParam }),
+    initialPageParam: null as string | null,
+    getNextPageParam: (lastPage) => lastPage.nextCursor,
     enabled: Boolean(user?.id),
   });
 }

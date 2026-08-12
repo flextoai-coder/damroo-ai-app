@@ -11,9 +11,10 @@ import {
 } from 'react-native';
 
 import { ShareIcon, SparkleIcon } from '@/components/playground/icons';
-import { PulsingDots, ShimmerBlock } from '@/components/playground/shimmer';
+import { PulsingDots, ShimmerBlock } from '@/components/ui/shimmer';
 import { brand } from '@/constants/brand';
 import { formatById } from '@/constants/playground';
+import { resizedImageUrl } from '@/lib/image-transform';
 import type { AssistantTurn, UserTurn } from '@/stores/playground-store';
 
 type UserBubbleProps = {
@@ -28,7 +29,7 @@ export function UserBubble({ turn }: UserBubbleProps) {
           {turn.attachments.map((a) => (
             <Image
               key={a.id}
-              source={{ uri: a.uri }}
+              source={{ uri: resizedImageUrl(a.uri, { width: 44, height: 44 }) }}
               style={styles.thumb}
               contentFit="cover"
             />
@@ -53,7 +54,21 @@ type AssistantBubbleProps = {
   onPress?: () => void;
   onShare: () => void;
   sharing?: boolean;
+  saving?: boolean;
 };
+
+/**
+ * Tile sizing for a 1-4 image result — 1 fills the row (unchanged from
+ * before multi-image support existed), 2+ lay out two per row via flexWrap,
+ * each tile keeping the generation's aspect ratio.
+ */
+function gridTileSize(count: number, maxW: number, ratio: number) {
+  const cols = count <= 1 ? 1 : 2;
+  const tileW = cols === 1 ? maxW : (maxW - GRID_GAP) / 2;
+  return { tileW, tileH: tileW / ratio };
+}
+
+const GRID_GAP = 6;
 
 export function AssistantBubble({
   turn,
@@ -62,11 +77,11 @@ export function AssistantBubble({
   onPress,
   onShare,
   sharing,
+  saving,
 }: AssistantBubbleProps) {
   const { width } = useWindowDimensions();
   const format = formatById(turn.aspectRatio);
   const maxW = Math.min(width * 0.72, 280);
-  const imgH = maxW / format.ratio;
 
   return (
     <View style={styles.assistantRow}>
@@ -82,10 +97,19 @@ export function AssistantBubble({
         {turn.status === 'loading' ? (
           <>
             <View style={styles.designingRow}>
-              <Text style={styles.designing}>Designing</Text>
+              <Text style={styles.designing}>
+                {turn.imageCount > 1 ? `Designing ${turn.imageCount} images` : 'Designing'}
+              </Text>
               <PulsingDots />
             </View>
-            <ShimmerBlock style={{ width: maxW, height: imgH }} borderRadius={18} />
+            <View style={[styles.grid, { width: maxW }]}>
+              {(() => {
+                const { tileW, tileH } = gridTileSize(turn.imageCount, maxW, format.ratio);
+                return Array.from({ length: Math.max(1, turn.imageCount) }).map((_, i) => (
+                  <ShimmerBlock key={i} style={{ width: tileW, height: tileH }} borderRadius={18} />
+                ));
+              })()}
+            </View>
             <ShimmerBlock style={styles.captionBarWide} borderRadius={8} />
             <ShimmerBlock style={styles.captionBarNarrow} borderRadius={8} />
           </>
@@ -102,33 +126,43 @@ export function AssistantBubble({
 
         {turn.status === 'done' ? (
           <>
-            <Pressable
-              onPress={onPress}
-              disabled={!onPress}
-              style={[styles.resultFrame, { width: maxW, height: imgH }]}
-              accessibilityRole="button"
-              accessibilityLabel="View generation details">
-              {turn.imageUrl ? (
-                <Image
-                  source={{ uri: turn.imageUrl }}
-                  style={StyleSheet.absoluteFill}
-                  contentFit="cover"
-                />
+            <View style={[styles.grid, { width: maxW }]}>
+              {turn.imageUrls.length > 0 ? (
+                (() => {
+                  const { tileW, tileH } = gridTileSize(turn.imageUrls.length, maxW, format.ratio);
+                  return turn.imageUrls.map((url, i) => (
+                    <Pressable
+                      key={url}
+                      onPress={onPress}
+                      disabled={!onPress}
+                      style={[styles.resultFrame, { width: tileW, height: tileH }]}
+                      accessibilityRole="button"
+                      accessibilityLabel="View generation details">
+                      <Image
+                        source={{ uri: resizedImageUrl(url, { width: tileW, height: tileH }) }}
+                        style={StyleSheet.absoluteFill}
+                        contentFit="cover"
+                      />
+                      {i === 0 && turn.brandKitApplied ? (
+                        <View style={styles.badge}>
+                          <Text style={styles.badgeText}>✦ AUTO-BRANDED</Text>
+                        </View>
+                      ) : null}
+                    </Pressable>
+                  ));
+                })()
               ) : (
                 <LinearGradient
                   colors={['#FFEDD5', '#FDBA74', '#FB923C']}
                   start={{ x: 0, y: 0 }}
                   end={{ x: 1, y: 1 }}
-                  style={StyleSheet.absoluteFill}
+                  style={[styles.resultFrame, { width: maxW, height: maxW / format.ratio }]}
                 />
               )}
-              <View style={styles.badge}>
-                <Text style={styles.badgeText}>✦ AUTO-BRANDED</Text>
-              </View>
-            </Pressable>
+            </View>
             <View style={styles.actions}>
               <GlassAction label="Regenerate" onPress={onRegenerate} />
-              <GlassAction label="Save" onPress={onSave} />
+              <GlassAction label="Save" busy={saving} onPress={onSave} />
               <GlassAction icon busy={sharing} onPress={onShare} />
             </View>
           </>
@@ -235,6 +269,11 @@ const styles = StyleSheet.create({
   captionBarNarrow: {
     width: 110,
     height: 12,
+  },
+  grid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: GRID_GAP,
   },
   resultFrame: {
     borderRadius: 18,

@@ -2,7 +2,9 @@ import { useRouter, useLocalSearchParams, type Href } from 'expo-router';
 import { useEffect, useState } from 'react';
 import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
 
+import { TemplateConfigureSheet } from '@/components/templates/template-configure-sheet';
 import { brand } from '@/constants/brand';
+import { useTemplateConfigureFlow } from '@/hooks/use-template-configure-flow';
 import { loadTemplateIntoPlayground } from '@/services/remix-template';
 import { fetchTemplateById } from '@/services/templates';
 
@@ -11,6 +13,17 @@ export default function TemplateDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
   const [error, setError] = useState<string | null>(null);
+
+  const configureFlow = useTemplateConfigureFlow({
+    onComplete: (template, selections) => {
+      loadTemplateIntoPlayground(template, selections);
+      router.replace('/(tabs)/assistant' as Href);
+    },
+    onCancel: () => {
+      if (router.canGoBack()) router.back();
+      else router.replace('/(tabs)/templates' as Href);
+    },
+  });
 
   useEffect(() => {
     let cancelled = false;
@@ -27,11 +40,11 @@ export default function TemplateDetailScreen() {
           setError('Template not found');
           return;
         }
-        loadTemplateIntoPlayground(template);
-        router.replace('/(tabs)/assistant' as Href);
+        configureFlow.open(template);
       } catch (e) {
         if (!cancelled) {
-          setError(e instanceof Error ? e.message : 'Failed to open template');
+          if (__DEV__) console.error('[template] Failed to load template:', e);
+          setError('An error occurred');
         }
       }
     }
@@ -40,6 +53,7 @@ export default function TemplateDetailScreen() {
     return () => {
       cancelled = true;
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id, router]);
 
   return (
@@ -52,6 +66,14 @@ export default function TemplateDetailScreen() {
           <Text style={styles.subtitle}>Opening in Playground…</Text>
         </>
       )}
+
+      <TemplateConfigureSheet
+        visible={configureFlow.visible}
+        template={configureFlow.template}
+        config={configureFlow.config}
+        onFinish={configureFlow.finish}
+        onCancel={configureFlow.cancel}
+      />
     </View>
   );
 }

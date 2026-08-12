@@ -110,6 +110,8 @@ export function ColorPickerSheet({
   const sheetHeight = Math.min(height * 0.78, height - insets.top - 40);
   const pickerRef = useRef<ColorPickerRef>(null);
   const inputFocusedRef = useRef(false);
+  const valueRef = useRef(value);
+  valueRef.current = value;
 
   const seed = toSolidHex(value, DEFAULT_COLOR);
   /** Stable seed for ColorPicker — never bind live draft back into `value`. */
@@ -134,7 +136,7 @@ export function ColorPickerSheet({
       return;
     }
 
-    const next = toSolidHex(value, DEFAULT_COLOR);
+    const next = toSolidHex(valueRef.current, DEFAULT_COLOR);
     setPickerSeed(next);
     setDraftHex(next);
     setHexText(next);
@@ -147,7 +149,10 @@ export function ColorPickerSheet({
     requestAnimationFrame(() => {
       pickerRef.current?.setColor(next, 0);
     });
-  }, [visible, sheetHeight, translateY, value]);
+    // Re-seed only on a real open/close transition — `onApply` updates the
+    // parent's `value` while this sheet is still visible and mid-dismiss;
+    // reacting to that here would reset translateY and reopen the sheet.
+  }, [visible, sheetHeight, translateY]);
 
   const finishClose = () => {
     onClose();

@@ -28,30 +28,37 @@ npm run eas:prod     # store binaries
 
 Profiles: `development` · `preview` · `production` (`eas.json`).
 
-## Apple IAP products (App Store Connect)
+## RevenueCat (Android + iOS — single purchase path)
 
-Create auto-renewable subscriptions matching:
+Purchases are led entirely by RevenueCat's native SDK on both platforms; there is no
+direct Razorpay or manual Apple-receipt integration.
 
-| Product ID | Plan | Credits |
-|---|---|---|
-| `damroo_starter_monthly` | Starter | 500 |
-| `damroo_growth_monthly` | Growth | 1000 |
-| `damroo_scale_monthly` | Scale | 2000 |
+1. Create a RevenueCat project at app.revenuecat.com, with an app entry for iOS and
+   one for Android.
+2. In App Store Connect and Google Play Console, create auto-renewable subscriptions
+   matching:
 
-Client verifies via Edge Function `verify-apple-iap` with `APPLE_IAP_SHARED_SECRET`.
+   | Product ID | Plan | Credits |
+   |---|---|---|
+   | `damroo_starter_monthly` | Starter | 500 |
+   | `damroo_growth_monthly` | Growth | 1000 |
+   | `damroo_scale_monthly` | Scale | 2000 |
 
-## Razorpay (Android)
+3. In RevenueCat, attach both stores' products to a single "default" offering with
+   three packages (one per plan) so `Purchases.getOfferings()` returns them together.
+4. Project settings → API keys → copy the iOS and Android **public** SDK keys into
+   `EXPO_PUBLIC_REVENUECAT_IOS_API_KEY` / `EXPO_PUBLIC_REVENUECAT_ANDROID_API_KEY`.
+5. Project settings → Integrations → Webhooks → add endpoint:
 
-1. Dashboard → Webhooks → add endpoint:
+   `https://thvqecpkurkzcmkdqzki.supabase.co/functions/v1/revenuecat-webhook`
 
-   `https://thvqecpkurkzcmkdqzki.supabase.co/functions/v1/razorpay-webhook`
+6. Set the same value in the webhook's "Authorization header" field and in the Edge
+   secret `REVENUECAT_WEBHOOK_AUTH_HEADER`.
 
-2. Subscribe to `payment.captured` (and optionally `order.paid`).
-3. Set the webhook secret as Edge secret `RAZORPAY_WEBHOOK_SECRET`.
-4. Ensure `RAZORPAY_KEY_ID` + `RAZORPAY_KEY_SECRET` are set as Edge secrets.
-5. App uses `EXPO_PUBLIC_RAZORPAY_KEY_ID` for checkout only.
-
-Orders are created by `create-razorpay-order` with plan notes (`user_id`, `plan_id`).
+The client calls `Purchases.configure({ apiKey, appUserID: <supabase user id> })` once
+signed in (see `src/services/purchases.ts`), so `revenuecat-webhook` can match
+`event.app_user_id` straight back to the Supabase user and credit their account via
+`activate_plan_subscription`.
 
 ## Cron — expire subscriptions
 
@@ -67,17 +74,16 @@ Zeros credits and marks plans expired after `current_period_end` (no rollover).
 
 - `ARK_API_KEY` (+ optional `ARK_BASE_URL`, `ARK_MODEL`)
 - `OPENAI_API_KEY`
-- `RAZORPAY_KEY_ID` / `RAZORPAY_KEY_SECRET` / `RAZORPAY_WEBHOOK_SECRET`
-- `APPLE_IAP_SHARED_SECRET`
+- `REVENUECAT_WEBHOOK_AUTH_HEADER`
 - `CRON_SECRET`
 
 ## QA checklist
 
 - [ ] Google sign-in (iOS + Android); Apple sign-in (iOS only)
 - [ ] New user blocked from tabs until paid onboarding completes
-- [ ] Android: Razorpay success → 500 / 1000 / 2000 credits; fail → no grant
-- [ ] iOS: IAP success → same credits via `verify-apple-iap`
-- [ ] Period end without renew → credits 0 (cron)
+- [ ] Android: RevenueCat (Play Billing) purchase → 500 / 1000 / 2000 credits; fail → no grant
+- [ ] iOS: RevenueCat (StoreKit) purchase → same credits via `revenuecat-webhook`
+- [ ] Period end without renew → credits 0 (cron + `EXPIRATION` webhook event)
 - [ ] Generate with 0 credits → blocked + upgrade messaging
 - [ ] Multi-reference attachment order preserved in Seedream payload
 - [ ] Enhance prompt mutates composer only

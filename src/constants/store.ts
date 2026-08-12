@@ -8,10 +8,11 @@ export const STORE = {
   marketingUrl: 'https://damroo.ai',
   /** Supabase project hosting Edge Functions */
   supabaseUrl: 'https://thvqecpkurkzcmkdqzki.supabase.co',
-  razorpayWebhookPath: '/functions/v1/razorpay-webhook',
+  revenuecatWebhookPath: '/functions/v1/revenuecat-webhook',
   appleProductIds: PLANS.map((p) => p.appleProductId),
+  androidProductIds: PLANS.map((p) => p.androidProductId),
 } as const;
 
-export function razorpayWebhookUrl(): string {
-  return `${STORE.supabaseUrl}${STORE.razorpayWebhookPath}`;
+export function revenuecatWebhookUrl(): string {
+  return `${STORE.supabaseUrl}${STORE.revenuecatWebhookPath}`;
 }

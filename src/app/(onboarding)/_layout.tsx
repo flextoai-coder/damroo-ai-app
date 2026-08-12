@@ -6,7 +6,6 @@ export default function OnboardingLayout() {
       <Stack.Screen name="business" />
       <Stack.Screen name="business-type" />
       <Stack.Screen name="links" />
-      <Stack.Screen name="subscription" />
     </Stack>
   );
 }

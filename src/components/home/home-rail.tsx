@@ -23,6 +23,8 @@ export function HomeRail({ children }: HomeRailProps) {
 const styles = StyleSheet.create({
   rail: {
     marginBottom: 28,
+    flexGrow: 0,
+    flexShrink: 0,
   },
   content: {
     paddingLeft: 22,

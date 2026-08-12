@@ -4,7 +4,7 @@
 
 **Damroo AI** — a cross-platform Expo (React Native) app for AI image generation (GPT-wrapper style). Users sign in, onboard with business details + paid plan, then generate images via ByteDance Seedream 4.5, browse history, remix templates, and share with captions.
 
-Target: Google Play + App Store. Stack: Expo SDK 57, Supabase (auth/DB/storage/Edge Functions), Seedream 4.5, OpenAI (prompt enhance + captions), Razorpay (Android) + expo-iap (iOS).
+Target: Google Play + App Store. Stack: Expo SDK 57, Supabase (auth/DB/storage/Edge Functions), Seedream 4.5, OpenAI (prompt enhance + captions), RevenueCat (Android + iOS subscriptions).
 
 Video module is UI-only for now (“Coming soon”, unclickable). Image module only.
 
@@ -48,11 +48,11 @@ Do not use outdated Expo patterns or APIs from memory.
 
 ## Non-negotiables
 
-1. **Never put secrets in the client** — `ARK_API_KEY`, `OPENAI_API_KEY`, Razorpay secret, Apple verify keys live only in Supabase Edge Function secrets / server env. App uses `EXPO_PUBLIC_SUPABASE_*` + anon key only.
-2. **All AI + payment mutations go through Edge Functions** with a valid Supabase JWT. No direct Seedream/OpenAI/Razorpay secret calls from the app.
+1. **Never put secrets in the client** — `ARK_API_KEY`, `OPENAI_API_KEY`, the RevenueCat webhook auth secret live only in Supabase Edge Function secrets / server env. App uses `EXPO_PUBLIC_SUPABASE_*` + anon key + RevenueCat's *public* SDK keys only.
+2. **All AI mutations go through Edge Functions** with a valid Supabase JWT. Purchases go through RevenueCat's native SDK on-device; credits are only ever granted server-side by the `revenuecat-webhook` Edge Function, never by the client.
 3. **Credits are authoritative on the server** — atomic debit (`FOR UPDATE`), ledger audit, never trust client credit counts.
 4. **Persist Seedream outputs to Supabase Storage immediately** — provider URLs expire (~24h).
-5. **Apple Sign-In only on iOS.** Razorpay on Android; **expo-iap on iOS** for subscriptions (App Store rule).
+5. **Apple Sign-In only on iOS.** Purchases are led entirely by RevenueCat on both Android and iOS — no direct Razorpay or manual Apple-receipt calls.
 6. **Onboarding incomplete → no tabs.** Paid plan required before main app (v1).
 7. **Attachment order is sacred** — pass reference images to Seedream in the same order the user attached them.
 8. **Video stays disabled** until explicitly scoped later.
@@ -65,8 +65,8 @@ Do not use outdated Expo patterns or APIs from memory.
 
 ```
 App (UI) → Supabase Auth / DB / Storage (RLS)
-         → Edge Functions → Seedream | OpenAI | Razorpay
-         → expo-iap (iOS) → Edge verify
+         → Edge Functions → Seedream | OpenAI
+         → RevenueCat SDK (Android + iOS) → RevenueCat webhook → Edge Function → credits
 ```
 
 - **Client cache:** Zustand (UI/session) + TanStack Query (server state) + FlashList + `expo-image`. Not Redis on device.
@@ -81,7 +81,7 @@ App (UI) → Supabase Auth / DB / Storage (RLS)
 1. Foundation — deps, env, providers, folders  
 2. Supabase schema + RLS + storage  
 3. Auth + route gate  
-4. Onboarding + Razorpay (Android) + expo-iap (iOS)  
+4. Onboarding + RevenueCat (Android + iOS)  
 5. Tabs shell + module selector + credits chip  
 6. Edge AI — enhance-prompt, generate-image, generate-caption  
 7. AI Assistant UI + loading animation + conversation memory  

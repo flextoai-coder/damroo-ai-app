@@ -131,6 +131,20 @@ export function UploadIcon({ size = 18, color = '#0F172A' }: IconProps) {
   );
 }
 
+export function CameraIcon({ size = 18, color = '#0F172A' }: IconProps) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Path
+        d="M9 5.5l1-1.5h4l1 1.5h2.5A1.5 1.5 0 0119 7v10a1.5 1.5 0 01-1.5 1.5h-11A1.5 1.5 0 015 17V7a1.5 1.5 0 011.5-1.5H9z"
+        stroke={color}
+        strokeWidth={1.8}
+        strokeLinejoin="round"
+      />
+      <Circle cx="12" cy="12" r="3.4" stroke={color} strokeWidth={1.8} />
+    </Svg>
+  );
+}
+
 export function PasteIcon({ size = 18, color = '#0F172A' }: IconProps) {
   return (
     <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">

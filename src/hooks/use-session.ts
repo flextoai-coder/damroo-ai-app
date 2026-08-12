@@ -7,6 +7,7 @@ export function useSession() {
   const profile = useAuthStore((s) => s.profile);
   const onboardingCompleted = useAuthStore((s) => s.onboardingCompleted);
   const isHydrated = useAuthStore((s) => s.isHydrated);
+  const isProfileReady = useAuthStore((s) => s.isProfileReady);
 
   return {
     session,
@@ -14,6 +15,7 @@ export function useSession() {
     profile,
     onboardingCompleted,
     isHydrated,
+    isProfileReady,
     isSignedIn: !!session,
   };
 }

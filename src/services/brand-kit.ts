@@ -1,3 +1,5 @@
+import { File } from 'expo-file-system';
+
 import { emptyToNull, normalizeHexColor } from '@/constants/brand-kit';
 import { queryClient } from '@/lib/query-client';
 import { supabase } from '@/lib/supabase';
@@ -88,21 +90,51 @@ export async function brandLogoSignedUrl(
   return data.signedUrl;
 }
 
-/** Upload a logo image; returns storage path and updates brand_kits.logo_storage_path. */
-export async function uploadBrandLogo(userId: string, localUri: string): Promise<BrandKit> {
-  const response = await fetch(localUri);
-  const blob = await response.blob();
-  const ext = blob.type.includes('png')
-    ? 'png'
-    : blob.type.includes('webp')
-      ? 'webp'
-      : blob.type.includes('heic')
-        ? 'heic'
-        : 'jpg';
+function extensionForContentType(contentType: string): string {
+  if (contentType.includes('png')) return 'png';
+  if (contentType.includes('webp')) return 'webp';
+  if (contentType.includes('heic') || contentType.includes('heif')) return 'heic';
+  return 'jpg';
+}
+
+/** Best-effort content type from the file path when the caller doesn't already know it. */
+function guessContentTypeFromUri(uri: string): string {
+  const path = uri.split('?')[0].toLowerCase();
+  if (path.endsWith('.png')) return 'image/png';
+  if (path.endsWith('.webp')) return 'image/webp';
+  if (path.endsWith('.heic') || path.endsWith('.heif')) return 'image/heic';
+  return 'image/jpeg';
+}
+
+/**
+ * Upload a logo image; returns storage path and updates brand_kits.logo_storage_path.
+ * Also serves as "replace" — re-calling this with a new image swaps it in and
+ * cleans up the previous file (fetched first, before the new upload lands).
+ *
+ * Reads the file via expo-file-system's `File` (bytes, not a Blob) —
+ * React Native's `fetch(uri).blob()` is a well-known unreliable path for
+ * uploading local files through the Supabase JS client; it frequently
+ * produces corrupted or empty uploads. Passing raw bytes sidesteps that.
+ */
+export async function uploadBrandLogo(
+  userId: string,
+  localUri: string,
+  mimeType?: string | null,
+): Promise<BrandKit> {
+  const { data: existing } = await supabase
+    .from('brand_kits')
+    .select('logo_storage_path')
+    .eq('user_id', userId)
+    .maybeSingle();
+  const previousPath = existing?.logo_storage_path ?? null;
+
+  const contentType = mimeType || guessContentTypeFromUri(localUri);
+  const ext = extensionForContentType(contentType);
+  const bytes = await new File(localUri).bytes();
   const path = `${userId}/logo.${ext}`;
 
-  const { error: uploadError } = await supabase.storage.from(BUCKET).upload(path, blob, {
-    contentType: blob.type || 'image/jpeg',
+  const { error: uploadError } = await supabase.storage.from(BUCKET).upload(path, bytes, {
+    contentType,
     upsert: true,
   });
   if (uploadError) throw uploadError;
@@ -115,6 +147,13 @@ export async function uploadBrandLogo(userId: string, localUri: string): Promise
 
   if (error || !data) {
     throw error ?? new Error('Could not save logo');
+  }
+
+  // Different extension than before (e.g. replacing a .png with a .jpg) means
+  // the old file sits at a different path and `upsert` above never touched
+  // it — remove it explicitly so a "replace" doesn't leave it orphaned.
+  if (previousPath && previousPath !== path) {
+    await supabase.storage.from(BUCKET).remove([previousPath]);
   }
 
   void queryClient.invalidateQueries({ queryKey: ['brand-kit', userId] });

@@ -1,38 +1,41 @@
+import type { FlashListRef } from '@shopify/flash-list';
 import { Image } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
-import { useRouter, type Href } from 'expo-router';
-import { useRef } from 'react';
-import {
-  ActivityIndicator,
-  Pressable,
-  RefreshControl,
-  ScrollView,
-  StyleSheet,
-  Text,
-  View,
-} from 'react-native';
+import { useRouter, useScrollToTop, type Href } from 'expo-router';
+import { useRef, useState } from 'react';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { FestivalCta } from '@/components/home/festival-cta';
 import { GenerationCard, NewDesignTile } from '@/components/home/generation-card';
-import { GenerationsGrid } from '@/components/home/generations-grid';
+import { GenerationsGrid, GRID_CONTAINER_INSET } from '@/components/home/generations-grid';
+import { HeroBannerCarousel } from '@/components/home/hero-banner-carousel';
 import { HomeRail } from '@/components/home/home-rail';
 import { PosterCard } from '@/components/home/poster-card';
+import { RenewalBanner } from '@/components/home/renewal-banner';
 import { SectionHead } from '@/components/home/section-head';
+import { PlanPickerSheet } from '@/components/profile/plan-picker-sheet';
 import { AppScreen } from '@/components/shell/app-screen';
 import { ModuleSwitcher } from '@/components/shell/module-switcher';
+import { SkeletonRail } from '@/components/ui/skeleton';
+import { TemplateConfigureSheet } from '@/components/templates/template-configure-sheet';
 import { brand } from '@/constants/brand';
-import { useHomeGenerations, useHomeTemplates } from '@/hooks/use-home-data';
+import { nextPlanId, type Plan, type PlanId } from '@/constants/plans';
+import { useHomeBanners, useInfiniteGenerations, useHomeTemplates } from '@/hooks/use-home-data';
 import { useTabScreenPadding } from '@/hooks/use-screen-padding';
 import { useSession } from '@/hooks/use-session';
+import { useSubscription } from '@/hooks/use-subscription';
 import { useTabBarScroll } from '@/hooks/use-tab-bar-scroll';
+import { useTemplateConfigureFlow } from '@/hooks/use-template-configure-flow';
+import { resizedImageUrl } from '@/lib/image-transform';
+import type { Generation } from '@/services/generations';
 import { primaryAssetUrl } from '@/services/generations';
+import {
+  isUserCancelledPurchase,
+  purchaseErrorMessage,
+  purchasePlan,
+} from '@/services/purchases';
 import { loadTemplateIntoPlayground } from '@/services/remix-template';
-
-const PLACEHOLDER_GENERATIONS = [
-  { id: 'p1', title: 'Weekend Brunch', createdAt: daysAgo(2) },
-  { id: 'p2', title: 'Diwali Dhamaka', createdAt: daysAgo(4) },
-  { id: 'p3', title: 'New Menu Drop', createdAt: daysAgo(6) },
-] as const;
+import { toast } from '@/stores/toast-store';
 
 const PLACEHOLDER_TEMPLATES = [
   { id: 't1', title: 'Story Sale', industry: 'Retail' },
@@ -41,19 +44,19 @@ const PLACEHOLDER_TEMPLATES = [
   { id: 't4', title: 'Offer Burst', industry: 'Restaurant' },
 ] as const;
 
-function daysAgo(n: number) {
-  return new Date(Date.now() - n * 24 * 60 * 60 * 1000).toISOString();
-}
-
 export default function HomeScreen() {
   const router = useRouter();
   const { profile, user } = useSession();
   const scrollProps = useTabBarScroll();
   const screenPadding = useTabScreenPadding();
-  const generationsQuery = useHomeGenerations();
+  const generationsQuery = useInfiniteGenerations();
   const templatesQuery = useHomeTemplates();
-  const scrollRef = useRef<ScrollView>(null);
+  const bannersQuery = useHomeBanners();
+  const subscriptionQuery = useSubscription();
+  const listRef = useRef<FlashListRef<Generation>>(null);
+  useScrollToTop(listRef);
   const generationsY = useRef(0);
+  const [plansOpen, setPlansOpen] = useState(false);
 
   const fullName =
     profile?.full_name ??
@@ -64,53 +67,90 @@ export default function HomeScreen() {
     profile?.avatar_url ?? (user?.user_metadata?.avatar_url as string | undefined) ?? null;
   const initials = firstName.slice(0, 1).toUpperCase();
 
-  const generations = generationsQuery.data ?? [];
+  const generations = generationsQuery.data?.pages.flatMap((page) => page.items) ?? [];
   const templates = templatesQuery.data ?? [];
-  const refreshing = generationsQuery.isRefetching || templatesQuery.isRefetching;
+  const refreshing =
+    generationsQuery.isRefetching || templatesQuery.isRefetching || bannersQuery.isRefetching;
 
   const openPlayground = () => {
     router.push('/(tabs)/assistant' as Href);
   };
 
+  const configureFlow = useTemplateConfigureFlow({
+    onComplete: (template, selections) => {
+      loadTemplateIntoPlayground(template, selections);
+      openPlayground();
+    },
+  });
+
   const openProfile = () => {
     router.push('/(tabs)/profile' as Href);
   };
 
-  const openTemplates = () => {
-    router.push('/(tabs)/templates' as Href);
+  const openTemplates = (industry?: string) => {
+    if (industry) {
+      router.push(`/(tabs)/templates?industry=${encodeURIComponent(industry)}` as Href);
+    } else {
+      router.push('/(tabs)/templates' as Href);
+    }
   };
 
-  const openGeneration = (id: string, isPlaceholder = false) => {
-    if (isPlaceholder) {
-      openPlayground();
-      return;
-    }
+  const openGeneration = (id: string) => {
     router.push(`/generation/${id}` as Href);
   };
 
+  const subscription = subscriptionQuery.data;
+  const isPaid = subscription?.status === 'active';
+  const creditsRemaining = isPaid ? subscription.credits_remaining : 0;
+  const currentPlanId = isPaid && subscription?.plan ? (subscription.plan as PlanId) : null;
+  const bannerMode: 'renew' | 'upgrade' | null = !isPaid
+    ? 'renew'
+    : creditsRemaining <= 0
+      ? 'upgrade'
+      : null;
+  const upgradeTargetPlanId = currentPlanId ? nextPlanId(currentPlanId) : null;
+
+  const openPlans = () => {
+    setPlansOpen(true);
+  };
+
+  const onSelectPlan = async (plan: Plan) => {
+    setPlansOpen(false);
+    try {
+      await purchasePlan(plan.id);
+      await subscriptionQuery.refetch();
+      toast(`You're on ${plan.name} now!`, 'success');
+    } catch (e) {
+      if (isUserCancelledPurchase(e)) return;
+      toast(purchaseErrorMessage(e), 'error');
+    }
+  };
+
   const scrollToGenerations = () => {
-    scrollRef.current?.scrollTo({
-      y: Math.max(0, generationsY.current - 12),
+    listRef.current?.scrollToOffset({
+      offset: Math.max(0, generationsY.current - 12),
       animated: true,
     });
   };
 
-  const latestRailItems =
-    generations.length > 0
-      ? generations.slice(0, 8).map((g) => ({
-          id: g.id,
-          title: g.prompt.trim().slice(0, 28) || 'Untitled',
-          createdAt: g.created_at,
-          imageUrl: primaryAssetUrl(g),
-          placeholder: false,
-        }))
-      : PLACEHOLDER_GENERATIONS.map((p) => ({
-          id: p.id,
-          title: p.title,
-          createdAt: p.createdAt,
-          imageUrl: null as string | null,
-          placeholder: true,
-        }));
+  const onLoadMore = () => {
+    if (generationsQuery.hasNextPage && !generationsQuery.isFetchingNextPage) {
+      void generationsQuery.fetchNextPage();
+    }
+  };
+
+  const onRefresh = () => {
+    void generationsQuery.refetch();
+    void templatesQuery.refetch();
+    void bannersQuery.refetch();
+  };
+
+  const latestRailItems = generations.slice(0, 8).map((g) => ({
+    id: g.id,
+    title: g.prompt.trim().slice(0, 28) || 'Untitled',
+    createdAt: g.created_at,
+    imageUrl: primaryAssetUrl(g),
+  }));
 
   const templateRailItems =
     templates.length > 0
@@ -135,128 +175,153 @@ export default function HomeScreen() {
           template: null,
         }));
 
-  return (
-    <AppScreen edges={[]} glowBlobs contentStyle={styles.screenContent}>
-      <ScrollView
-        ref={scrollRef}
-        {...scrollProps}
-        style={styles.scroll}
-        contentContainerStyle={[styles.content, screenPadding]}
-        showsVerticalScrollIndicator={false}
-        refreshControl={
-          <RefreshControl
-            refreshing={refreshing}
-            onRefresh={() => {
-              void generationsQuery.refetch();
-              void templatesQuery.refetch();
-            }}
-            tintColor={brand.orange}
-          />
-        }>
-        {/* 1. Top bar */}
-        <View style={styles.topBar}>
-          <Pressable
-            onPress={openProfile}
-            style={styles.profileRow}
-            accessibilityRole="button"
-            accessibilityLabel="Open profile">
-            <LinearGradient
-              colors={[brand.orange, brand.orangeDeep]}
-              start={{ x: 0, y: 0 }}
-              end={{ x: 1, y: 1 }}
-              style={styles.avatarRing}>
-              <View style={styles.avatarInner}>
-                {avatarUrl ? (
-                  <Image
-                    source={{ uri: avatarUrl }}
-                    style={styles.avatarImage}
-                    contentFit="cover"
-                  />
-                ) : (
-                  <Text style={styles.avatarInitial}>{initials}</Text>
-                )}
-              </View>
-            </LinearGradient>
-            <View style={styles.welcomeCopy}>
-              <Text style={styles.welcomeEyebrow}>Welcome back</Text>
-              <Text style={styles.welcomeName} numberOfLines={1}>
-                {firstName} 👋
-              </Text>
+  const header = (
+    <View style={styles.header}>
+      {/* 1. Top bar */}
+      <View style={styles.topBar}>
+        <Pressable
+          onPress={openProfile}
+          style={styles.profileRow}
+          accessibilityRole="button"
+          accessibilityLabel="Open profile">
+          <LinearGradient
+            colors={[brand.orange, brand.orangeDeep]}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 1 }}
+            style={styles.avatarRing}>
+            <View style={styles.avatarInner}>
+              {avatarUrl ? (
+                <Image
+                  source={{ uri: resizedImageUrl(avatarUrl, { width: 44, height: 44 }) }}
+                  style={styles.avatarImage}
+                  contentFit="cover"
+                />
+              ) : (
+                <Text style={styles.avatarInitial}>{initials}</Text>
+              )}
             </View>
-          </Pressable>
-          <ModuleSwitcher />
-        </View>
+          </LinearGradient>
+          <View style={styles.welcomeCopy}>
+            <Text style={styles.welcomeEyebrow}>Welcome back</Text>
+            <Text style={styles.welcomeName} numberOfLines={1}>
+              {firstName} 👋
+            </Text>
+          </View>
+        </Pressable>
+        <ModuleSwitcher />
+      </View>
 
-        {/* 2. Latest Generations by You */}
-        <SectionHead title="Latest Generations by You" onViewAll={scrollToGenerations} />
+      {/* 2. Hero banner carousel */}
+      <HeroBannerCarousel />
+
+      {/* 3. Renew / upgrade alert */}
+      {bannerMode === 'renew' ? (
+        <RenewalBanner
+          title="No active plan"
+          subtitle="Subscribe to keep generating designs"
+          ctaLabel="Renew now"
+          onPress={openPlans}
+        />
+      ) : bannerMode === 'upgrade' ? (
+        <RenewalBanner
+          title="You're out of credits"
+          subtitle="Upgrade your plan to keep creating"
+          ctaLabel="Upgrade"
+          onPress={openPlans}
+        />
+      ) : null}
+
+      {/* 4. Latest Generations by You */}
+      <SectionHead title="Latest Generations by You" onViewAll={scrollToGenerations} />
+      <HomeRail>
+        {latestRailItems.map((item) => (
+          <GenerationCard
+            key={item.id}
+            title={item.title}
+            createdAt={item.createdAt}
+            imageUrl={item.imageUrl}
+            onPress={() => openGeneration(item.id)}
+          />
+        ))}
+        <NewDesignTile onPress={openPlayground} />
+      </HomeRail>
+
+      {/* 5. Festival CTA */}
+      <FestivalCta onPress={openPlayground} />
+
+      {/* 6. Based on your business */}
+      <SectionHead
+        title="Based on your business"
+        onViewAll={() => openTemplates(profile?.industry ?? undefined)}
+      />
+      {templatesQuery.isLoading ? (
+        <SkeletonRail />
+      ) : (
         <HomeRail>
-          {latestRailItems.map((item) => (
-            <GenerationCard
+          {templateRailItems.map((item) => (
+            <PosterCard
               key={item.id}
               title={item.title}
-              createdAt={item.createdAt}
-              imageUrl={item.imageUrl}
-              placeholder={item.placeholder}
-              onPress={() => openGeneration(item.id, item.placeholder)}
+              industry={item.industry}
+              category={item.category}
+              ribbon={item.source === 'official' ? null : item.source}
+              previewPath={item.previewPath}
+              onPress={() => {
+                if (item.placeholder || !item.template) {
+                  openTemplates(profile?.industry ?? undefined);
+                  return;
+                }
+                configureFlow.open(item.template);
+              }}
             />
           ))}
-          <NewDesignTile onPress={openPlayground} />
         </HomeRail>
+      )}
 
-        {/* 3. Festival CTA */}
-        <FestivalCta onPress={openPlayground} />
+      {/* 7. Full generations view */}
+      <View
+        onLayout={(e) => {
+          generationsY.current = e.nativeEvent.layout.y;
+        }}>
+        <SectionHead title="Your generations" />
+      </View>
+    </View>
+  );
 
-        {/* 4. Based on your business */}
-        <SectionHead
-          title="Based on your business"
-          onViewAll={openTemplates}
-        />
-        {templatesQuery.isLoading ? (
-          <View style={styles.railLoader}>
-            <ActivityIndicator color={brand.orange} />
-          </View>
-        ) : (
-          <HomeRail>
-            {templateRailItems.map((item) => (
-              <PosterCard
-                key={item.id}
-                title={item.title}
-                industry={item.industry}
-                category={item.category}
-                ribbon={item.source}
-                previewPath={item.previewPath}
-                onPress={() => {
-                  if (item.placeholder || !item.template) {
-                    openTemplates();
-                    return;
-                  }
-                  loadTemplateIntoPlayground(item.template);
-                  openPlayground();
-                }}
-              />
-            ))}
-          </HomeRail>
-        )}
+  return (
+    <AppScreen edges={[]} glowBlobs contentStyle={styles.screenContent}>
+      <GenerationsGrid
+        ref={listRef}
+        generations={generations}
+        onPressGeneration={(id) => openGeneration(id)}
+        onCreate={openPlayground}
+        ListHeaderComponent={header}
+        loading={generationsQuery.isLoading}
+        onLoadMore={onLoadMore}
+        hasMore={generationsQuery.hasNextPage}
+        loadingMore={generationsQuery.isFetchingNextPage}
+        refreshing={refreshing}
+        onRefresh={onRefresh}
+        onScroll={scrollProps.onScroll}
+        scrollEventThrottle={scrollProps.scrollEventThrottle}
+        contentContainerStyle={screenPadding}
+      />
 
-        {/* 6. Full generations view */}
-        <View
-          onLayout={(e) => {
-            generationsY.current = e.nativeEvent.layout.y;
-          }}>
-          <SectionHead title="Your generations" />
-        </View>
-        {generationsQuery.isLoading ? (
-          <View style={styles.gridLoader}>
-            <ActivityIndicator color={brand.orange} />
-          </View>
-        ) : (
-          <GenerationsGrid
-            generations={generations}
-            onPressGeneration={(id) => openGeneration(id)}
-            onCreate={openPlayground}
-          />
-        )}
-      </ScrollView>
+      <PlanPickerSheet
+        visible={plansOpen}
+        onClose={() => setPlansOpen(false)}
+        currentPlanId={currentPlanId}
+        initialPlanId={bannerMode === 'upgrade' ? upgradeTargetPlanId : null}
+        onSelectPlan={onSelectPlan}
+      />
+
+      <TemplateConfigureSheet
+        visible={configureFlow.visible}
+        template={configureFlow.template}
+        config={configureFlow.config}
+        onFinish={configureFlow.finish}
+        onCancel={configureFlow.cancel}
+      />
     </AppScreen>
   );
 }
@@ -265,11 +330,11 @@ const styles = StyleSheet.create({
   screenContent: {
     flex: 1,
   },
-  scroll: {
-    flex: 1,
-  },
-  content: {
-    // Top/bottom padding applied via useTabScreenPadding (safe-area aware).
+  // Cancels GenerationsGrid's shared FlashList contentContainerStyle inset —
+  // see GRID_CONTAINER_INSET's doc comment. Every section below already
+  // carries its own 22px side padding independently.
+  header: {
+    marginHorizontal: -GRID_CONTAINER_INSET,
   },
   topBar: {
     flexDirection: 'row',
@@ -324,16 +389,5 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     color: brand.ink,
     letterSpacing: -0.3,
-  },
-  railLoader: {
-    height: 200,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 28,
-  },
-  gridLoader: {
-    height: 160,
-    alignItems: 'center',
-    justifyContent: 'center',
   },
 });

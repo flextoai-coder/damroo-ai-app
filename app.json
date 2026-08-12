@@ -99,7 +99,14 @@
         }
       ],
       "expo-sharing",
-      "expo-iap",
+      [
+        "expo-media-library",
+        {
+          "photosPermission": false,
+          "savePhotosPermission": "Damroo AI saves your generated images to your photos.",
+          "granularPermissions": ["photo"]
+        }
+      ],
       "expo-system-ui",
       [
         "expo-navigation-bar",

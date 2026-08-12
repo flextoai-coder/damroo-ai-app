@@ -91,7 +91,6 @@ const styles = StyleSheet.create({
   },
   cardSelected: {
     borderColor: brand.orange,
-    backgroundColor: 'rgba(255, 237, 213, 0.55)',
     shadowOpacity: 0.1,
     shadowRadius: 10,
     shadowOffset: { width: 0, height: 4 },

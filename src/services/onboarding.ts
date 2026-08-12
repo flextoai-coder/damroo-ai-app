@@ -7,14 +7,9 @@ import { updateProfile } from '@/services/profile';
 import { useAuthStore } from '@/stores/auth-store';
 import type { OnboardingDraft } from '@/stores/onboarding-store';
 
-function authErrorMessage(error: unknown, fallback: string) {
-  if (error && typeof error === 'object' && 'message' in error) {
-    const message = String((error as { message: unknown }).message);
-    if (message.trim()) return message;
-  }
-  if (error instanceof Error && error.message.trim()) {
-    return error.message;
-  }
+// Never surface the raw Supabase/Postgres error text to the user — always the
+// caller's curated fallback copy.
+function authErrorMessage(_error: unknown, fallback: string) {
   return fallback;
 }
 

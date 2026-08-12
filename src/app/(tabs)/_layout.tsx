@@ -1,6 +1,7 @@
 import { Tabs } from 'expo-router';
 
 import { FloatingTabBar } from '@/components/shell/floating-tab-bar';
+import { tabSlideInterpolator, tabSlideTransitionSpec } from '@/constants/tab-transition';
 
 export default function TabsLayout() {
   return (
@@ -9,6 +10,9 @@ export default function TabsLayout() {
       screenOptions={{
         headerShown: false,
         sceneStyle: { backgroundColor: '#FBEEE0' },
+        // Directional slide between tabs — feels swipeable, based on tab order.
+        sceneStyleInterpolator: tabSlideInterpolator,
+        transitionSpec: tabSlideTransitionSpec,
         // Floating custom bar — height 0 so the navigator doesn't reserve a
         // bottom strip (that empty band was shrinking the Android viewport).
         tabBarStyle: {

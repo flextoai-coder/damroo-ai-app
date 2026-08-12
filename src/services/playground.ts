@@ -2,8 +2,12 @@ import { File } from 'expo-file-system';
 
 import { invokeFunction } from '@/services/api';
 import { supabase } from '@/lib/supabase';
-import type { ComposerAttachment } from '@/stores/chat-composer-store';
-import type { ImageQuality } from '@/stores/chat-composer-store';
+import {
+  modelReferenceAttachments,
+  type ComposerAttachment,
+  type ImageQuality,
+  type ImageVariation,
+} from '@/stores/chat-composer-store';
 
 type EnhanceResponse = {
   prompt?: string;
@@ -26,16 +30,31 @@ type GenerateImageResponse = {
 };
 
 /**
- * Calls the enhance-prompt Edge Function (OpenAI).
- * Falls back to a light local rewrite if the function is unavailable.
+ * Calls the enhance-prompt Edge Function (OpenAI, vision-capable). Considers
+ * whichever context is actually available — the minimal prompt, any
+ * reference image(s), the target aspect ratio, and whichever brand kit
+ * toggles are on. Falls back to a light local rewrite if the function is
+ * unavailable.
  */
-export async function enhancePrompt(prompt: string): Promise<string> {
-  const trimmed = prompt.trim();
+export async function enhancePrompt(params: {
+  prompt: string;
+  aspectRatio?: string;
+  referenceImages?: string[];
+  useBrandLogo?: boolean;
+  useBrandName?: boolean;
+  useBrandColors?: boolean;
+}): Promise<string> {
+  const trimmed = params.prompt.trim();
   if (!trimmed) return trimmed;
 
   try {
     const data = await invokeFunction<EnhanceResponse>('enhance-prompt', {
       prompt: trimmed,
+      aspect_ratio: params.aspectRatio,
+      reference_images: params.referenceImages ?? [],
+      use_brand_logo: params.useBrandLogo ?? false,
+      use_brand_name: params.useBrandName ?? false,
+      use_brand_colors: params.useBrandColors ?? false,
     });
     return (data.enhanced_prompt ?? data.prompt ?? trimmed).trim();
   } catch {
@@ -129,18 +148,26 @@ export async function resolveReferenceUrls(
 export async function generateImage(params: {
   userId: string;
   prompt: string;
+  /**
+   * Interpolated text from a template's guided-flow selections, if any —
+   * sent separately from `prompt` so the server can give it priority and it
+   * can never be silently overridden by free-text additions.
+   */
+  lockedPrompt?: string | null;
   aspectRatio: string;
   quality?: ImageQuality;
   imageCount?: number;
+  /** How different each image in the batch should look — ignored server-side unless imageCount > 1. */
+  variation?: ImageVariation;
   attachments?: ComposerAttachment[];
   conversationId?: string | null;
   templateId?: string | null;
   enhancedPrompt?: string | null;
-  /** Attach the brand kit logo as a reference image. Defaults to true. */
+  /** Attach the brand kit logo as a reference image. Off by default. */
   useBrandLogo?: boolean;
-  /** Mention the business name in the generation prompt. Defaults to true. */
+  /** Mention the business name in the generation prompt. Off by default. */
   useBrandName?: boolean;
-  /** Apply the brand kit color palette to the generation prompt. Defaults to true. */
+  /** Apply the brand kit color palette to the generation prompt. Off by default. */
   useBrandColors?: boolean;
   /** Which generation model to use — defaults to Seedream 4.5 server-side. */
   modelId?: string;
@@ -150,23 +177,29 @@ export async function generateImage(params: {
   conversationId: string;
   imageUrls: string[];
 }> {
-  const referenceImages = await resolveReferenceUrls(
-    params.userId,
-    params.attachments ?? [],
-  );
+  const modelAttachments = modelReferenceAttachments(params.attachments ?? []);
+  const referenceImages = await resolveReferenceUrls(params.userId, modelAttachments);
+  // `modelReferenceAttachments` already sorts product-kind items first — the
+  // server uses this count to know how many leading `reference_images` are
+  // the product (vs. supporting reference/style images) without needing a
+  // separate per-image role field.
+  const productReferenceCount = modelAttachments.filter((a) => a.kind === 'product').length;
 
   const data = await invokeFunction<GenerateImageResponse>('generate-image', {
     prompt: params.prompt,
+    locked_prompt: params.lockedPrompt ?? null,
     enhanced_prompt: params.enhancedPrompt ?? null,
     aspect_ratio: params.aspectRatio,
     quality: params.quality ?? '2K',
     image_count: params.imageCount ?? 1,
+    variation: params.variation ?? 'balanced',
     reference_images: referenceImages,
+    product_reference_count: productReferenceCount,
     conversation_id: params.conversationId ?? null,
     template_id: params.templateId ?? null,
-    use_brand_logo: params.useBrandLogo ?? true,
-    use_brand_name: params.useBrandName ?? true,
-    use_brand_colors: params.useBrandColors ?? true,
+    use_brand_logo: params.useBrandLogo ?? false,
+    use_brand_name: params.useBrandName ?? false,
+    use_brand_colors: params.useBrandColors ?? false,
     model: params.modelId,
   });
 

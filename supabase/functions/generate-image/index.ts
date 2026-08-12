@@ -1,29 +1,44 @@
 import 'jsr:@supabase/functions-js/edge-runtime.d.ts';
 
+import { autoEnhanceImagePrompt } from '../_shared/auto-enhance.ts';
 import { loadBrandPromptContext, withBrandContext } from '../_shared/brand-context.ts';
 import { checkPromptContent } from '../_shared/content-filter.ts';
 import { corsHeaders, errorResponse, jsonResponse } from '../_shared/cors.ts';
 import { callGptImage } from '../_shared/gpt-image.ts';
+import {
+  withPromptPriority,
+  withReferenceRoleContext,
+  withVariationContext,
+} from '../_shared/prompt-hardening.ts';
 import { callSeedream } from '../_shared/seedream.ts';
 import { getServiceClient, requireUser } from '../_shared/supabase.ts';
 
 type GenerateBody = {
   prompt?: string;
+  /** Interpolated text from a template's guided-flow selections — mandatory, given priority over `prompt`. */
+  locked_prompt?: string | null;
   enhanced_prompt?: string | null;
   aspect_ratio?: string;
   quality?: '2K' | '4K';
   image_count?: number;
+  /** How different each image in a multi-image batch should look — ignored when image_count is 1. */
+  variation?: 'subtle' | 'balanced' | 'bold';
   /** Ordered reference image URLs (http/https or storage paths resolved by client). */
   reference_images?: string[];
+  /** How many of the leading `reference_images` are the product (rest are supporting references). */
+  product_reference_count?: number;
   conversation_id?: string | null;
   template_id?: string | null;
-  /** Per-generation brand kit toggles. Default to true when omitted. */
+  /** Per-generation brand kit toggles. Off by default when omitted. */
   use_brand_logo?: boolean;
   use_brand_name?: boolean;
   use_brand_colors?: boolean;
   /** Which generation model to use — defaults to Seedream 4.5 for anything else. */
   model?: string;
 };
+
+/** Mirrors MAX_IMAGE_COUNT in src/constants/playground.ts — enforced here too, not just client-side. */
+const MAX_IMAGE_COUNT = 4;
 
 function base64ToUint8Array(base64: string): Uint8Array {
   const binary = atob(base64);
@@ -56,28 +71,64 @@ Deno.serve(async (req) => {
   try {
     const body = (await req.json()) as GenerateBody;
     const prompt = body.prompt?.trim() ?? '';
-    if (!prompt) return errorResponse('prompt is required');
+    const lockedPrompt = body.locked_prompt?.trim() || null;
+    if (!prompt && !lockedPrompt) return errorResponse('prompt is required');
 
     const aspectRatio = body.aspect_ratio?.trim() || '1:1';
     const quality = body.quality === '4K' ? '4K' : '2K';
-    const imageCount = Math.min(15, Math.max(1, Number(body.image_count ?? 1) || 1));
+    const imageCount = Math.min(MAX_IMAGE_COUNT, Math.max(1, Number(body.image_count ?? 1) || 1));
+    const variation =
+      body.variation === 'subtle' || body.variation === 'bold' ? body.variation : 'balanced';
     const references = (body.reference_images ?? []).filter(Boolean).slice(0, 14);
     const enhanced = body.enhanced_prompt?.trim() || null;
+    const productReferenceCount = Math.max(
+      0,
+      Math.min(references.length, Number(body.product_reference_count ?? 0) || 0),
+    );
+    // The full text the user saw and acted on — stored as the generation's
+    // prompt (history, conversation title, regenerate) instead of just the
+    // free-text part, now that the locked portion lives in its own field.
+    const displayPrompt = [lockedPrompt, prompt].filter(Boolean).join('\n\n') || prompt;
 
     const promptCheck = checkPromptContent(prompt);
+    const lockedCheck = lockedPrompt ? checkPromptContent(lockedPrompt) : { blocked: false };
     const enhancedCheck = enhanced ? checkPromptContent(enhanced) : { blocked: false };
-    if (promptCheck.blocked || enhancedCheck.blocked) {
+    if (promptCheck.blocked || lockedCheck.blocked || enhancedCheck.blocked) {
       return errorResponse(
-        (promptCheck.blocked ? promptCheck.reason : enhancedCheck.reason) ??
+        (promptCheck.blocked ? promptCheck.reason : lockedCheck.blocked ? lockedCheck.reason : enhancedCheck.reason) ??
           'This prompt cannot be generated.',
         422,
         { code: 'explicit_content' },
       );
     }
 
-    const useBrandLogo = body.use_brand_logo !== false;
-    const useBrandName = body.use_brand_name !== false;
-    const useBrandColors = body.use_brand_colors !== false;
+    // Automatic, always-on rewrite of whatever bare/minimal prompt the user
+    // typed — distinct from the client-triggered `enhance-prompt` function.
+    // Runs before the generation row is created so the true final text ends
+    // up in `enhanced_prompt`, not just a manually-enhanced one.
+    const baseFreePrompt = enhanced || prompt;
+    const autoEnhancedPrompt = baseFreePrompt
+      ? await autoEnhanceImagePrompt({
+          prompt: baseFreePrompt,
+          lockedPrompt,
+          aspectRatio,
+          referenceImages: references,
+          productReferenceCount,
+        })
+      : baseFreePrompt;
+
+    if (autoEnhancedPrompt !== baseFreePrompt) {
+      const autoEnhancedCheck = checkPromptContent(autoEnhancedPrompt);
+      if (autoEnhancedCheck.blocked) {
+        return errorResponse(autoEnhancedCheck.reason ?? 'This prompt cannot be generated.', 422, {
+          code: 'explicit_content',
+        });
+      }
+    }
+
+    const useBrandLogo = body.use_brand_logo === true;
+    const useBrandName = body.use_brand_name === true;
+    const useBrandColors = body.use_brand_colors === true;
 
     let conversationId = body.conversation_id ?? null;
     if (conversationId) {
@@ -93,7 +144,7 @@ Deno.serve(async (req) => {
         .from('conversations')
         .insert({
           user_id: userId,
-          title: prompt.slice(0, 80),
+          title: displayPrompt.slice(0, 80),
         })
         .select('id')
         .single();
@@ -109,8 +160,8 @@ Deno.serve(async (req) => {
         user_id: userId,
         conversation_id: conversationId,
         template_id: body.template_id ?? null,
-        prompt,
-        enhanced_prompt: enhanced,
+        prompt: displayPrompt,
+        enhanced_prompt: autoEnhancedPrompt || null,
         aspect_ratio: aspectRatio,
         quality,
         image_count: imageCount,
@@ -152,20 +203,14 @@ Deno.serve(async (req) => {
       conversation_id: conversationId,
       user_id: userId,
       role: 'user',
-      content: prompt,
+      content: displayPrompt,
       generation_id: generationId,
       attachments: references.map((uri, i) => ({ uri, order: i })),
     });
 
-    const brandContext = await loadBrandPromptContext(service, userId, {
-      includeName: useBrandName,
-      includeColors: useBrandColors,
-      includeLogo: useBrandLogo,
-    });
-    const seedreamPrompt = withBrandContext(enhanced || prompt, brandContext);
-
     // Brand logo first (if any and enabled), then user reference images in attachment order.
     let referenceImages = references;
+    let logoPrepended = false;
     if (useBrandLogo) {
       const { data: kit } = await service
         .from('brand_kits')
@@ -178,9 +223,32 @@ Deno.serve(async (req) => {
           .createSignedUrl(kit.logo_storage_path, 60 * 30);
         if (signed?.signedUrl) {
           referenceImages = [signed.signedUrl, ...references].slice(0, 14);
+          logoPrepended = true;
         }
       }
     }
+
+    const brandContext = await loadBrandPromptContext(service, userId, {
+      includeName: useBrandName,
+      includeColors: useBrandColors,
+      includeLogo: useBrandLogo,
+    });
+    // Priority order: the template's locked selections always apply first
+    // (over the auto-enhanced free text), then reference image roles are
+    // spelled out — offset by one if a brand logo ended up prepended to
+    // `referenceImages`, so "the first N" still points at the actual product
+    // images and not the logo slot — then batch-variation instructions (only
+    // meaningful for imageCount > 1) — then brand kit instructions on top
+    // (the logo's own role is covered there).
+    const promptWithPriority = withPromptPriority(lockedPrompt, autoEnhancedPrompt);
+    const promptWithRoles = withReferenceRoleContext(
+      promptWithPriority,
+      productReferenceCount,
+      references.length - productReferenceCount,
+      logoPrepended,
+    );
+    const promptWithVariation = withVariationContext(promptWithRoles, variation, imageCount);
+    const seedreamPrompt = withBrandContext(promptWithVariation, brandContext);
 
     const useGptImage = body.model === 'gpt-image-2';
 

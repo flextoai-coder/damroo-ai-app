@@ -14,6 +14,7 @@ import {
 } from 'react-native';
 import { KeyboardAvoidingView } from 'react-native-keyboard-controller';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import Svg, { Circle, Path } from 'react-native-svg';
 
 import { AppleLogo } from '@/components/apple-logo';
 import { GoogleLogo } from '@/components/google-logo';
@@ -29,7 +30,7 @@ import {
 } from '@/services/auth';
 
 /** Image 2 — full-bleed background art */
-const heroImage = require('../../../assets/images/auth-hero.png');
+const heroImage = require('../../../assets/images/auth-horses-bg.jpeg');
 
 const FEATURES = [
   { icon: '✦', label: 'AI-Powered\nGeneration' },
@@ -48,6 +49,26 @@ const STRENGTH_COLORS = {
   4: '#16A34A',
 } as const;
 
+function EyeIcon({ visible, size = 20, color = brand.muted }: EyeIconProps) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Path
+        d="M2 12s3.8-6.5 10-6.5S22 12 22 12s-3.8 6.5-10 6.5S2 12 2 12z"
+        stroke={color}
+        strokeWidth={1.8}
+        strokeLinejoin="round"
+        strokeLinecap="round"
+      />
+      <Circle cx="12" cy="12" r="3" stroke={color} strokeWidth={1.8} />
+      {!visible ? (
+        <Path d="M3.5 3.5l17 17" stroke={color} strokeWidth={1.8} strokeLinecap="round" />
+      ) : null}
+    </Svg>
+  );
+}
+
+type EyeIconProps = { visible: boolean; size?: number; color?: string };
+
 export default function LoginScreen() {
   const insets = useSafeAreaInsets();
   const { height } = useWindowDimensions();
@@ -58,6 +79,7 @@ export default function LoginScreen() {
   const [appleAvailable, setAppleAvailable] = useState(false);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
 
   const showApple = Platform.OS === 'ios' && appleAvailable;
   const strength = getPasswordStrength(password);
@@ -95,7 +117,8 @@ export default function LoginScreen() {
         );
       }
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Google sign-in failed');
+      if (__DEV__) console.error('[auth] Google sign-in error:', e);
+      setError('An error occurred');
     } finally {
       setBusy(null);
     }
@@ -107,11 +130,12 @@ export default function LoginScreen() {
     try {
       await signInWithApple();
     } catch (e) {
-      const message = e instanceof Error ? e.message : 'Apple sign-in failed';
+      const message = e instanceof Error ? e.message : '';
       if (message.toLowerCase().includes('cancel')) {
         setError(null);
       } else {
-        setError(message);
+        if (__DEV__) console.error('[auth] Apple sign-in error:', e);
+        setError('An error occurred');
       }
     } finally {
       setBusy(null);
@@ -170,7 +194,7 @@ export default function LoginScreen() {
         <Image
           source={heroImage}
           style={styles.backgroundImage}
-          contentFit="contain"
+          contentFit="cover"
           contentPosition="top"
           transition={200}
         />
@@ -213,8 +237,8 @@ export default function LoginScreen() {
         style={[
           styles.layerContent,
           {
-            paddingTop: Platform.OS === 'android' ? 10 : insets.top + 6,
-            paddingBottom: Platform.OS === 'android' ? 10 : insets.bottom + 10,
+            paddingTop: insets.top + 6,
+            paddingBottom: insets.bottom + 10,
           },
         ]}
         behavior="padding">
@@ -358,20 +382,31 @@ export default function LoginScreen() {
                 accessibilityLabel="Email"
               />
 
-              <TextInput
-                style={styles.input}
-                value={password}
-                onChangeText={setPassword}
-                placeholder="Password"
-                placeholderTextColor={brand.mutedSoft}
-                secureTextEntry
-                autoCapitalize="none"
-                autoCorrect={false}
-                autoComplete={mode === 'email-signup' ? 'new-password' : 'password'}
-                textContentType={mode === 'email-signup' ? 'newPassword' : 'password'}
-                editable={busy === null}
-                accessibilityLabel="Password"
-              />
+              <View style={styles.passwordWrap}>
+                <TextInput
+                  style={[styles.input, styles.passwordInput]}
+                  value={password}
+                  onChangeText={setPassword}
+                  placeholder="Password"
+                  placeholderTextColor={brand.mutedSoft}
+                  secureTextEntry={!showPassword}
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  autoComplete={mode === 'email-signup' ? 'new-password' : 'password'}
+                  textContentType={mode === 'email-signup' ? 'newPassword' : 'password'}
+                  editable={busy === null}
+                  accessibilityLabel="Password"
+                />
+                <Pressable
+                  onPress={() => setShowPassword((v) => !v)}
+                  disabled={busy !== null}
+                  hitSlop={8}
+                  accessibilityRole="button"
+                  accessibilityLabel={showPassword ? 'Hide password' : 'Show password'}
+                  style={styles.eyeButton}>
+                  <EyeIcon visible={showPassword} />
+                </Pressable>
+              </View>
 
               {mode === 'email-signup' ? (
                 <View style={styles.strengthBlock}>
@@ -719,6 +754,21 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     fontSize: 16,
     color: brand.ink,
+  },
+  passwordWrap: {
+    justifyContent: 'center',
+  },
+  passwordInput: {
+    paddingRight: 48,
+  },
+  eyeButton: {
+    position: 'absolute',
+    right: 4,
+    top: 0,
+    bottom: 0,
+    width: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   strengthBlock: {
     gap: 6,

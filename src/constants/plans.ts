@@ -6,7 +6,10 @@ export type Plan = {
   priceInr: number;
   credits: number;
   images: number;
+  /** RevenueCat product identifier on the App Store. */
   appleProductId: string;
+  /** RevenueCat product identifier on Google Play — `productId:basePlanId`, per Play Billing's subscription model. */
+  androidProductId: string;
   tagline: string;
   benefits: string[];
   /** Gradient accents for the plan card */
@@ -22,6 +25,7 @@ export const PLANS: Plan[] = [
     credits: 500,
     images: 500,
     appleProductId: 'damroo_starter_monthly',
+    androidProductId: 'damroo_starter_monthly:monthly',
     tagline: 'For solo creators getting consistent',
     colors: ['#FB923C', '#F97316'],
     benefits: [
@@ -39,6 +43,7 @@ export const PLANS: Plan[] = [
     credits: 1000,
     images: 1000,
     appleProductId: 'damroo_growth_monthly',
+    androidProductId: 'damroo_growth_monthly:monthly',
     tagline: 'For brands posting every week',
     colors: ['#F97316', '#EA580C'],
     benefits: [
@@ -57,6 +62,7 @@ export const PLANS: Plan[] = [
     credits: 2000,
     images: 2000,
     appleProductId: 'damroo_scale_monthly',
+    androidProductId: 'damroo_scale_monthly:monthly',
     tagline: 'For teams shipping at volume',
     colors: ['#EA580C', '#C2410C'],
     benefits: [
@@ -77,6 +83,12 @@ export function getPlan(id: PlanId): Plan {
     throw new Error(`Unknown plan: ${id}`);
   }
   return plan;
+}
+
+/** Next tier above `id`, or `id` itself if already the top plan. */
+export function nextPlanId(id: PlanId): PlanId {
+  const index = PLANS.findIndex((p) => p.id === id);
+  return PLANS[index + 1]?.id ?? id;
 }
 
 export function formatPlanPrice(priceInr: number): string {

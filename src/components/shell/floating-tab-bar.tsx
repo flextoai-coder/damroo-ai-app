@@ -3,6 +3,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter, type Href } from 'expo-router';
 import { useEffect, useState } from 'react';
 import {
+  Platform,
   Pressable,
   StyleSheet,
   Text,
@@ -19,6 +20,7 @@ import Animated, {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { CaptionPickerSheet } from '@/components/captions/caption-picker-sheet';
+import { ReferenceLibrarySheet } from '@/components/playground/reference-library-sheet';
 import {
   BrandKitTabIcon,
   CaptionChipIcon,
@@ -35,6 +37,7 @@ import {
   TAB_FAB_LIFT,
   tabBarBottomPad,
 } from '@/constants/shell-layout';
+import { useChatComposerStore } from '@/stores/chat-composer-store';
 import { useTabShellStore } from '@/stores/tab-shell-store';
 
 const BAR_HEIGHT = TAB_BAR_HEIGHT;
@@ -44,6 +47,9 @@ const FAB_SIZE = 58;
 const FAB_LIFT = TAB_FAB_LIFT;
 const CENTER_GAP = 64;
 const HIDE_OFFSET = 120;
+// Android's BlurView renders far less translucent glass than iOS's — fall
+// back to a fully opaque fill there instead of a see-through bar.
+const BAR_BLUR_INTENSITY = Platform.OS === 'android' ? 0 : 55;
 
 type TabKey = 'index' | 'templates' | 'brand-kit' | 'profile';
 
@@ -86,6 +92,7 @@ export function FloatingTabBar({ state, navigation }: FloatingTabBarProps) {
   const setFabOpen = useTabShellStore((s) => s.setFabOpen);
   const toggleFab = useTabShellStore((s) => s.toggleFab);
   const [captionsPickerOpen, setCaptionsPickerOpen] = useState(false);
+  const [productPickerOpen, setProductPickerOpen] = useState(false);
 
   const hideProgress = useSharedValue(0);
   const fabProgress = useSharedValue(0);
@@ -147,8 +154,8 @@ export function FloatingTabBar({ state, navigation }: FloatingTabBarProps) {
     return null;
   }
 
-  // iOS: sit above the home indicator. Android: window is already above the
-  // system nav — only keep a small visual gap (avoids the large cream band).
+  // Sit above the system nav / home indicator using the real safe-area inset
+  // on both platforms (edge-to-edge is enabled on Android too).
   const bottomPad = tabBarBottomPad(insets.bottom);
 
   const onTabPress = (key: TabKey) => {
@@ -160,14 +167,18 @@ export function FloatingTabBar({ state, navigation }: FloatingTabBarProps) {
       target: route.key,
       canPreventDefault: true,
     });
-    if (!event.defaultPrevented) {
-      navigation.navigate(key);
-    }
+    if (event.defaultPrevented) return;
+
+    // Always a single direct transition to the destination tab, regardless
+    // of how many tabs away it is — no stepping through in-between screens.
+    navigation.navigate(key);
   };
 
   const onGenerateImage = () => {
     setFabOpen(false);
-    router.push('/(tabs)/assistant' as Href);
+    // Start every FAB-initiated generation from a clean composer draft.
+    useChatComposerStore.getState().reset();
+    setProductPickerOpen(true);
   };
 
   const onGenerateCaptions = () => {
@@ -233,7 +244,7 @@ export function FloatingTabBar({ state, navigation }: FloatingTabBarProps) {
         </View>
 
         <View style={styles.barWrap}>
-          <BlurView intensity={55} tint="light" style={styles.barBlur}>
+          <BlurView intensity={BAR_BLUR_INTENSITY} tint="light" style={styles.barBlur}>
             <View style={styles.barFill}>
               <View style={styles.tabsRow}>
                 {TABS.slice(0, 2).map((tab) => {
@@ -288,6 +299,16 @@ export function FloatingTabBar({ state, navigation }: FloatingTabBarProps) {
       <CaptionPickerSheet
         visible={captionsPickerOpen}
         onClose={() => setCaptionsPickerOpen(false)}
+      />
+
+      <ReferenceLibrarySheet
+        visible={productPickerOpen}
+        onClose={() => {
+          setProductPickerOpen(false);
+          router.push('/(tabs)/assistant' as Href);
+        }}
+        targetKind="product"
+        title="Product Images"
       />
     </View>
   );
@@ -397,7 +418,7 @@ const styles = StyleSheet.create({
   },
   barFill: {
     flex: 1,
-    backgroundColor: 'rgba(255,255,255,0.78)',
+    backgroundColor: Platform.OS === 'android' ? '#FFFFFF' : 'rgba(255,255,255,0.78)',
     justifyContent: 'center',
   },
   tabsRow: {

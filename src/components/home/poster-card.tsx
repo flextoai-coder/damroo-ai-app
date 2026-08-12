@@ -5,8 +5,13 @@ import { Pressable, StyleSheet, Text, View, type StyleProp, type ViewStyle } fro
 
 import { brand } from '@/constants/brand';
 import { categoryLabel } from '@/constants/templates';
+import { resizedImageUrl } from '@/lib/image-transform';
 import { templatePreviewUrl } from '@/services/templates';
 import type { Enums } from '@/types/database';
+
+/** Rail cards are a fixed 124px card; grid cards are ~half the screen width — sized generously either way. */
+const RAIL_IMAGE_SIZE = { width: 130, height: 170 };
+const GRID_IMAGE_SIZE = { width: 220, height: 220 };
 
 type PosterCardProps = {
   title: string;
@@ -46,7 +51,11 @@ export function PosterCard({
         <View style={styles.inner}>
           <View style={[styles.imageWrap, isGrid && styles.imageWrapGrid]}>
             {url ? (
-              <Image source={{ uri: url }} style={styles.image} contentFit="cover" />
+              <Image
+                source={{ uri: resizedImageUrl(url, isGrid ? GRID_IMAGE_SIZE : RAIL_IMAGE_SIZE) }}
+                style={styles.image}
+                contentFit="cover"
+              />
             ) : (
               <LinearGradient
                 colors={['#FFEDD5', '#FDBA74']}

@@ -12,6 +12,31 @@ export type Database = {
   __InternalSupabase: {
     PostgrestVersion: "14.5"
   }
+  graphql_public: {
+    Tables: {
+      [_ in never]: never
+    }
+    Views: {
+      [_ in never]: never
+    }
+    Functions: {
+      graphql: {
+        Args: {
+          extensions?: Json
+          operationName?: string
+          query?: string
+          variables?: Json
+        }
+        Returns: Json
+      }
+    }
+    Enums: {
+      [_ in never]: never
+    }
+    CompositeTypes: {
+      [_ in never]: never
+    }
+  }
   public: {
     Tables: {
       brand_kits: {
@@ -407,6 +432,35 @@ export type Database = {
         }
         Relationships: []
       }
+      reference_uploads: {
+        Row: {
+          created_at: string
+          id: string
+          storage_path: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          storage_path: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          storage_path?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "reference_uploads_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       subscriptions: {
         Row: {
           created_at: string
@@ -474,6 +528,7 @@ export type Database = {
           industry: string
           is_published: boolean
           preview_storage_path: string
+          remix_steps: Json | null
           sort_order: number
           source: Database["public"]["Enums"]["template_source"]
           title: string
@@ -489,6 +544,7 @@ export type Database = {
           industry: string
           is_published?: boolean
           preview_storage_path: string
+          remix_steps?: Json | null
           sort_order?: number
           source?: Database["public"]["Enums"]["template_source"]
           title: string
@@ -504,6 +560,7 @@ export type Database = {
           industry?: string
           is_published?: boolean
           preview_storage_path?: string
+          remix_steps?: Json | null
           sort_order?: number
           source?: Database["public"]["Enums"]["template_source"]
           title?: string
@@ -516,18 +573,39 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      activate_plan_subscription: {
+        Args: {
+          p_credits: number
+          p_period_end: string
+          p_period_start: string
+          p_plan: Database["public"]["Enums"]["plan_tier"]
+          p_provider: Database["public"]["Enums"]["payment_provider"]
+          p_provider_subscription_id: string
+          p_provider_transaction_id: string
+          p_user_id: string
+        }
+        Returns: string
+      }
+      debit_credits_for_generation: {
+        Args: { p_amount: number; p_generation_id: string; p_user_id: string }
+        Returns: string
+      }
       owns_conversation: {
         Args: { p_conversation_id: string }
         Returns: boolean
       }
       owns_generation: { Args: { p_generation_id: string }; Returns: boolean }
+      refund_credits_for_generation: {
+        Args: { p_generation_id: string; p_user_id: string }
+        Returns: boolean
+      }
     }
     Enums: {
       chat_role: "user" | "assistant" | "system"
       credit_reason: "plan_grant" | "generation" | "adjustment" | "expiry"
       generation_status: "pending" | "processing" | "completed" | "failed"
       image_quality: "2K" | "4K"
-      payment_provider: "razorpay" | "apple_iap"
+      payment_provider: "revenuecat"
       plan_tier: "starter" | "growth" | "scale"
       subscription_status: "active" | "expired" | "cancelled" | "past_due"
       template_category: "festival" | "offers" | "products" | "video"
@@ -657,13 +735,16 @@ export type CompositeTypes<
     : never
 
 export const Constants = {
+  graphql_public: {
+    Enums: {},
+  },
   public: {
     Enums: {
       chat_role: ["user", "assistant", "system"],
       credit_reason: ["plan_grant", "generation", "adjustment", "expiry"],
       generation_status: ["pending", "processing", "completed", "failed"],
       image_quality: ["2K", "4K"],
-      payment_provider: ["razorpay", "apple_iap"],
+      payment_provider: ["revenuecat"],
       plan_tier: ["starter", "growth", "scale"],
       subscription_status: ["active", "expired", "cancelled", "past_due"],
       template_category: ["festival", "offers", "products", "video"],
