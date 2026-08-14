@@ -1,17 +1,34 @@
 import { BlurView } from 'expo-blur';
 import { LinearGradient } from 'expo-linear-gradient';
 import type { ReactNode } from 'react';
+import { useEffect, useState } from 'react';
 import {
+  Dimensions,
   Platform,
+  Pressable,
   StyleSheet,
+  Text,
   View,
   type StyleProp,
   type ViewStyle,
 } from 'react-native';
+import Animated, {
+  Easing,
+  runOnJS,
+  useAnimatedStyle,
+  useSharedValue,
+  withTiming,
+} from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Svg, { Defs, RadialGradient, Rect, Stop } from 'react-native-svg';
 
 import { brand } from '@/constants/brand';
+import { TAB_SLIDE_DURATION_MS } from '@/constants/tab-transition';
+import { useTabShellStore } from '@/stores/tab-shell-store';
+
+const { width: SCREEN_WIDTH } = Dimensions.get('window');
+/** How long to wait past the expected transition length before offering a reload. */
+const RELOAD_WATCHDOG_MS = TAB_SLIDE_DURATION_MS + 600;
 
 type Edge = 'top' | 'bottom' | 'left' | 'right';
 
@@ -25,6 +42,13 @@ type AppScreenProps = {
   bottomExtra?: number;
   /** Soft orange glow blobs (home dashboard). */
   glowBlobs?: boolean;
+  /**
+   * This screen's position in the tab bar's declared order (Home=0,
+   * Templates=1, Brand Kit=2, Profile=3, Playground=4). When set, the
+   * screen slides in/out based on how it compares to the currently focused
+   * tab. Omit for non-tab screens (stack pushes like generation detail).
+   */
+  tabIndex?: number;
 };
 
 /**
@@ -103,11 +127,85 @@ export function AppScreen({
   contentStyle,
   bottomExtra = 0,
   glowBlobs = false,
+  tabIndex,
 }: AppScreenProps) {
   const insets = useSafeAreaInsets();
+  const activeTabIndex = useTabShellStore((s) => s.activeTabIndex);
+
+  // Resting position relative to whichever tab is focused: 0 while focused,
+  // -1/1 parked off-screen to the left/right otherwise. Re-derived from the
+  // store on every change, so unlike the navigator's own transition value it
+  // can't get orphaned mid-flight — the next update always retargets it
+  // authoritatively from its current position.
+  const slideTarget =
+    tabIndex === undefined ? 0 : tabIndex === activeTabIndex ? 0 : tabIndex < activeTabIndex ? -1 : 1;
+  const slideProgress = useSharedValue(slideTarget);
+
+  // `completedTarget` is written only from the withTiming callback below
+  // (an async, external-system update) or in the render-phase reset below —
+  // never synchronously inside an effect body — so `settled`/`showReload`
+  // can be plain derived values instead of state we'd otherwise have to
+  // reset from inside an effect.
+  const [completedTarget, setCompletedTarget] = useState(slideTarget);
+  const [prevSlideTarget, setPrevSlideTarget] = useState(slideTarget);
+  const [watchdogFired, setWatchdogFired] = useState(false);
+  const [remountKey, setRemountKey] = useState(0);
+
+  // React's documented pattern for resetting state when a dependency
+  // changes — done during render, not in an effect, so it isn't flagged as
+  // a synchronous setState-in-effect. See:
+  // https://react.dev/reference/react/useState#storing-information-from-previous-renders
+  if (slideTarget !== prevSlideTarget) {
+    setPrevSlideTarget(slideTarget);
+    setWatchdogFired(false);
+  }
+
+  const settled = completedTarget === slideTarget;
+  const showReload = watchdogFired && slideTarget === 0 && !settled;
+
+  useEffect(() => {
+    if (tabIndex === undefined) {
+      // Not a tab screen (stack pushes like generation detail) — no slide.
+      slideProgress.value = 0;
+      return;
+    }
+    slideProgress.value = withTiming(
+      slideTarget,
+      { duration: TAB_SLIDE_DURATION_MS, easing: Easing.linear },
+      (finished) => {
+        if (finished) runOnJS(setCompletedTarget)(slideTarget);
+      },
+    );
+  }, [slideTarget, slideProgress, tabIndex]);
+
+  // Safety net: if this screen is supposed to be the visible one but its
+  // slide never finished settling — whatever the cause — offer a manual way
+  // out instead of leaving the user staring at a screen that never resolves.
+  useEffect(() => {
+    if (tabIndex === undefined || slideTarget !== 0 || settled) return;
+    const timer = setTimeout(() => setWatchdogFired(true), RELOAD_WATCHDOG_MS);
+    return () => clearTimeout(timer);
+  }, [tabIndex, slideTarget, settled]);
+
+  const onReload = () => {
+    // Directly mutating a Reanimated shared value from an event handler is
+    // the standard way to drive it — the lint rule's static analysis just
+    // doesn't model `.value` writes as a special case, so it flags this as
+    // "modifying a value used in an effect dependency" even though it's not
+    // the antipattern that rule is meant to catch.
+    // eslint-disable-next-line react-hooks/immutability
+    slideProgress.value = 0;
+    setCompletedTarget(slideTarget);
+    setWatchdogFired(false);
+    setRemountKey((k) => k + 1);
+  };
+
+  const slideStyle = useAnimatedStyle(() => ({
+    transform: [{ translateX: slideProgress.value * SCREEN_WIDTH }],
+  }));
 
   return (
-    <View style={[styles.root, style]}>
+    <Animated.View style={[styles.root, style, slideStyle]}>
       <LinearGradient
         colors={[brand.canvasTop, brand.canvasBottom]}
         style={StyleSheet.absoluteFill}
@@ -121,6 +219,7 @@ export function AppScreen({
       ) : null}
 
       <View
+        key={remountKey}
         style={[
           styles.content,
           {
@@ -134,7 +233,21 @@ export function AppScreen({
         ]}>
         {children}
       </View>
-    </View>
+
+      {showReload ? (
+        <View
+          pointerEvents="box-none"
+          style={[styles.reloadWrap, { paddingBottom: insets.bottom + 24 }]}>
+          <Pressable
+            onPress={onReload}
+            style={styles.reloadPill}
+            accessibilityRole="button"
+            accessibilityLabel="Reload this screen">
+            <Text style={styles.reloadLabel}>Tap to reload</Text>
+          </Pressable>
+        </View>
+      ) : null}
+    </Animated.View>
   );
 }
 
@@ -147,6 +260,30 @@ const styles = StyleSheet.create({
     // during tab transitions (each screen translates as a rigid unit, so
     // the overflow briefly re-enters the viewport from the other side).
     overflow: 'hidden',
+  },
+  reloadWrap: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    alignItems: 'center',
+    zIndex: 100,
+  },
+  reloadPill: {
+    backgroundColor: brand.ink,
+    borderRadius: 999,
+    paddingVertical: 12,
+    paddingHorizontal: 22,
+    shadowColor: '#0F172A',
+    shadowOpacity: 0.25,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 6 },
+    elevation: 6,
+  },
+  reloadLabel: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: '700',
   },
   blobHost: {
     position: 'absolute',

@@ -3,7 +3,7 @@ import * as Clipboard from 'expo-clipboard';
 import { Image } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useLocalSearchParams, useRouter, type Href } from 'expo-router';
-import { useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -18,9 +18,18 @@ import {
   type NativeScrollEvent,
   type NativeSyntheticEvent,
 } from 'react-native';
+import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import { KeyboardAwareScrollView } from 'react-native-keyboard-controller';
+import Animated, {
+  runOnJS,
+  useAnimatedStyle,
+  useSharedValue,
+  withSpring,
+  withTiming,
+} from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { ImageViewerModal } from '@/components/generation/image-viewer-modal';
 import { SelectImagesSheet } from '@/components/generation/select-images-sheet';
 import { PlanPickerSheet } from '@/components/profile/plan-picker-sheet';
 import { AppScreen } from '@/components/shell/app-screen';
@@ -29,6 +38,8 @@ import { GenerationDetailSkeleton } from '@/components/ui/skeleton';
 import { brand } from '@/constants/brand';
 import type { Plan, PlanId } from '@/constants/plans';
 import { formatById } from '@/constants/playground';
+import { SHEET_SPRING } from '@/constants/sheet-motion';
+import { useHomeGenerations } from '@/hooks/use-home-data';
 import { useSession } from '@/hooks/use-session';
 import { useSubscription } from '@/hooks/use-subscription';
 import { track } from '@/lib/analytics';
@@ -38,7 +49,7 @@ import { requestSaveToGalleryAccess } from '@/lib/media-permissions';
 import { saveImageToGallery } from '@/lib/save-image';
 import { shareImage } from '@/lib/share-image';
 import { fetchGenerationById, fetchLatestCaption, primaryAssetUrl } from '@/services/generations';
-import { generateCaption, generateImage } from '@/services/playground';
+import { generateCaption, generateImage, waitForGeneration } from '@/services/playground';
 import {
   isUserCancelledPurchase,
   purchaseErrorMessage,
@@ -92,6 +103,7 @@ export default function GenerationDetailScreen() {
   const [sharingImage, setSharingImage] = useState(false);
   const [savingImage, setSavingImage] = useState(false);
   const [selectSheetMode, setSelectSheetMode] = useState<'save' | 'share' | null>(null);
+  const [viewerUrl, setViewerUrl] = useState<string | null>(null);
   const [carouselIndex, setCarouselIndex] = useState(0);
 
   const subscriptionQuery = useSubscription();
@@ -112,6 +124,87 @@ export default function GenerationDetailScreen() {
   const allImageUrls = generation
     ? generation.generation_assets.map((a) => a.public_url).filter((u): u is string => Boolean(u))
     : [];
+
+  // Same reverse-chronological list the Home grid shows — reused here purely
+  // to know which generation is "next" (older) / "previous" (newer) relative
+  // to this one for swipe navigation. If this generation isn't in that list
+  // (e.g. a deep link past the 40-item window), swiping simply has nowhere
+  // to go and just springs back — no error state needed.
+  const homeGenerationsQuery = useHomeGenerations();
+  const orderedIds = useMemo(
+    () => (homeGenerationsQuery.data ?? []).map((g) => g.id),
+    [homeGenerationsQuery.data],
+  );
+  const currentIndex = id ? orderedIds.indexOf(id) : -1;
+  const nextId = currentIndex >= 0 ? (orderedIds[currentIndex + 1] ?? null) : null;
+  const prevId = currentIndex > 0 ? (orderedIds[currentIndex - 1] ?? null) : null;
+
+  // Prefetch neighbours (generation + its caption) so a committed swipe
+  // resolves from cache instantly instead of showing a loading skeleton.
+  useEffect(() => {
+    if (!user?.id) return;
+    for (const neighbourId of [nextId, prevId]) {
+      if (!neighbourId) continue;
+      void queryClient.prefetchQuery({
+        queryKey: ['generation', neighbourId, user.id],
+        queryFn: () => fetchGenerationById(user.id, neighbourId),
+      });
+      void queryClient.prefetchQuery({
+        queryKey: ['caption', neighbourId],
+        queryFn: () => fetchLatestCaption(neighbourId),
+      });
+    }
+  }, [nextId, prevId, user?.id, queryClient]);
+
+  const dragX = useSharedValue(0);
+
+  const navigateToGeneration = (targetId: string) => {
+    dragX.value = 0;
+    // Update this screen's own route param in place — no new stack entry,
+    // no native push/replace transition. The Reanimated slide above is the
+    // only motion that should play; a `router.replace` here would also
+    // trigger the Stack navigator's own screen-transition animation on top
+    // of it, which reads as the whole screen reopening.
+    router.setParams({ id: targetId });
+    // Same screen instance persists across setParams, unlike a full
+    // navigation — reset per-generation UI state that would otherwise leak
+    // from the generation being left.
+    setCaption(null);
+    setModifyPrompt('');
+    setCarouselIndex(0);
+  };
+
+  // Swipe left → next (older) generation, swipe right → previous (newer),
+  // mirroring the reverse-chronological Home grid order. Only attached
+  // around the single-image view and the prompt/caption/remix content below
+  // it — the multi-image-per-generation carousel above keeps its own
+  // horizontal paging untouched so the two horizontal gestures never compete
+  // for the same touch.
+  const pageSwipe = Gesture.Pan()
+    .activeOffsetX([-12, 12])
+    .failOffsetY([-12, 12])
+    .onUpdate((e) => {
+      dragX.value = e.translationX;
+    })
+    .onEnd((e) => {
+      const goingNext = e.translationX < 0;
+      const target = goingNext ? nextId : prevId;
+      const passedThreshold =
+        Math.abs(e.translationX) > 70 || Math.abs(e.velocityX) > 800;
+
+      if (target && passedThreshold) {
+        const sign = goingNext ? -1 : 1;
+        dragX.value = withTiming(sign * windowWidth, { duration: 220 }, (finished) => {
+          if (finished) runOnJS(navigateToGeneration)(target);
+        });
+      } else {
+        dragX.value = withSpring(0, SHEET_SPRING);
+      }
+    });
+
+  const pageSwipeStyle = useAnimatedStyle(() => ({
+    transform: [{ translateX: dragX.value }],
+  }));
 
   const existingCaptionQuery = useQuery({
     queryKey: ['caption', id],
@@ -261,7 +354,7 @@ export default function GenerationDetailScreen() {
 
     setModifying(true);
     try {
-      const result = await generateImage({
+      const { generationId } = await generateImage({
         userId: user.id,
         prompt: text,
         aspectRatio: generation.aspect_ratio,
@@ -278,12 +371,19 @@ export default function GenerationDetailScreen() {
         ],
         conversationId: generation.conversation_id,
       });
+      // generateImage now returns as soon as the row exists — the provider
+      // call runs in the background, so wait for it here rather than
+      // navigating to a generation that has no images yet.
+      const outcome = await waitForGeneration(generationId);
+      if (outcome.status !== 'completed') {
+        throw new Error(outcome.errorMessage ?? 'Couldn’t modify image');
+      }
       void subscriptionQuery.refetch();
       void queryClient.invalidateQueries({ queryKey: ['generations', 'home', user.id] });
       setModifyPrompt('');
       toast('Image updated', 'success');
       track('generation_modify', { source_generation_id: generation.id });
-      router.replace(`/generation/${result.generationId}` as Href);
+      router.replace(`/generation/${generationId}` as Href);
     } catch (e) {
       const message = toUserErrorMessage(e, 'Couldn’t modify image');
       toast(message, 'error');
@@ -339,17 +439,23 @@ export default function GenerationDetailScreen() {
                   }}
                   style={[styles.frame, { aspectRatio: formatById(generation.aspect_ratio).ratio }]}>
                   {allImageUrls.map((url) => (
-                    <Image
+                    <Pressable
                       key={url}
-                      source={{
-                        uri: resizedImageUrl(url, {
-                          width: windowWidth - 44,
-                          height: (windowWidth - 44) / formatById(generation.aspect_ratio).ratio,
-                        }),
-                      }}
-                      style={[styles.image, { width: windowWidth - 44 }]}
-                      contentFit="cover"
-                    />
+                      onPress={() => setViewerUrl(url)}
+                      style={{ width: windowWidth - 44 }}
+                      accessibilityRole="imagebutton"
+                      accessibilityLabel="View full-resolution image">
+                      <Image
+                        source={{
+                          uri: resizedImageUrl(url, {
+                            width: windowWidth - 44,
+                            height: (windowWidth - 44) / formatById(generation.aspect_ratio).ratio,
+                          }),
+                        }}
+                        style={[styles.image, { width: windowWidth - 44 }]}
+                        contentFit="cover"
+                      />
+                    </Pressable>
                   ))}
                 </ScrollView>
                 <View style={styles.carouselDots}>
@@ -361,112 +467,130 @@ export default function GenerationDetailScreen() {
                   ))}
                 </View>
               </>
-            ) : (
-              <View
-                style={[
-                  styles.frame,
-                  { aspectRatio: formatById(generation.aspect_ratio).ratio },
-                ]}>
-                {imageUrl ? (
-                  <Image
-                    source={{
-                      uri: resizedImageUrl(imageUrl, {
-                        width: windowWidth - 44,
-                        height: (windowWidth - 44) / formatById(generation.aspect_ratio).ratio,
-                      }),
-                    }}
-                    style={styles.image}
-                    contentFit="cover"
-                  />
-                ) : (
-                  <LinearGradient
-                    colors={[brand.orangeSoft, '#FDBA74']}
-                    style={styles.image}
-                  />
-                )}
-              </View>
-            )}
-
-            <Text style={styles.section}>Prompt</Text>
-            <TruncatablePrompt key={generation.id} text={generation.prompt} />
-
-            {displayCaption ? (
-              <>
-                <Text style={styles.section}>Caption</Text>
-                <Text style={styles.prompt}>{displayCaption}</Text>
-              </>
             ) : null}
 
-            <View style={styles.actions}>
-              <Pressable
-                onPress={() => void onCaption()}
-                style={styles.secondaryBtn}
-                disabled={captionBusy}>
-                {captionBusy ? (
-                  <ActivityIndicator color={brand.orangeDeep} />
-                ) : (
-                  <Text style={styles.secondaryLabel}>
-                    {displayCaption ? 'Regenerate caption' : 'Generate caption'}
-                  </Text>
-                )}
-              </Pressable>
+            {/*
+              Swipe left/right here moves to the next/previous generation in
+              the same reverse-chronological order as the Home grid. Scoped
+              to the single-image frame + the content below it so it never
+              competes with the multi-image carousel's own horizontal paging
+              above (both are horizontal gestures — nesting them under the
+              same detector would make them fight over the same touch).
+            */}
+            <GestureDetector gesture={pageSwipe}>
+              <Animated.View style={pageSwipeStyle}>
+                {allImageUrls.length <= 1 ? (
+                  <Pressable
+                    onPress={() => imageUrl && setViewerUrl(imageUrl)}
+                    disabled={!imageUrl}
+                    style={[
+                      styles.frame,
+                      { aspectRatio: formatById(generation.aspect_ratio).ratio },
+                    ]}
+                    accessibilityRole="imagebutton"
+                    accessibilityLabel="View full-resolution image">
+                    {imageUrl ? (
+                      <Image
+                        source={{
+                          uri: resizedImageUrl(imageUrl, {
+                            width: windowWidth - 44,
+                            height: (windowWidth - 44) / formatById(generation.aspect_ratio).ratio,
+                          }),
+                        }}
+                        style={styles.image}
+                        contentFit="cover"
+                      />
+                    ) : (
+                      <LinearGradient
+                        colors={[brand.orangeSoft, '#FDBA74']}
+                        style={styles.image}
+                      />
+                    )}
+                  </Pressable>
+                ) : null}
 
-              <View style={styles.iconActionsRow}>
+                <Text style={styles.section}>Prompt</Text>
+                <TruncatablePrompt key={generation.id} text={generation.prompt} />
+
+                {displayCaption ? (
+                  <>
+                    <Text style={styles.section}>Caption</Text>
+                    <Text style={styles.prompt}>{displayCaption}</Text>
+                  </>
+                ) : null}
+
+                <View style={styles.actions}>
+                  <Pressable
+                    onPress={() => void onCaption()}
+                    style={styles.secondaryBtn}
+                    disabled={captionBusy}>
+                    {captionBusy ? (
+                      <ActivityIndicator color={brand.orangeDeep} />
+                    ) : (
+                      <Text style={styles.secondaryLabel}>
+                        {displayCaption ? 'Regenerate caption' : 'Generate caption'}
+                      </Text>
+                    )}
+                  </Pressable>
+
+                  <View style={styles.iconActionsRow}>
+                    <Pressable
+                      onPress={() => void onSave()}
+                      style={styles.iconBtn}
+                      disabled={savingImage || !imageUrl}>
+                      {savingImage ? (
+                        <ActivityIndicator color={brand.orangeDeep} />
+                      ) : (
+                        <>
+                          <DownloadIcon color={brand.orangeDeep} />
+                          <Text style={styles.iconBtnLabel}>Save</Text>
+                        </>
+                      )}
+                    </Pressable>
+                    <Pressable
+                      onPress={() => onShare()}
+                      style={[styles.iconBtn, styles.iconBtnPrimary]}
+                      disabled={sharingImage || captionBusy}>
+                      {sharingImage ? (
+                        <ActivityIndicator color="#FFFFFF" />
+                      ) : (
+                        <>
+                          <UploadIcon color="#FFFFFF" />
+                          <Text style={styles.iconBtnLabelPrimary}>Share</Text>
+                        </>
+                      )}
+                    </Pressable>
+                  </View>
+                </View>
+
+                <Text style={styles.section}>Remix this image</Text>
+                <Text style={styles.modifyHint}>
+                  This image will be used as a reference — describe the change you want.
+                </Text>
+                <TextInput
+                  value={modifyPrompt}
+                  onChangeText={setModifyPrompt}
+                  placeholder="e.g. Change the background to a beach at sunset"
+                  placeholderTextColor={brand.mutedSoft}
+                  multiline
+                  style={styles.modifyInput}
+                  editable={!modifying}
+                />
                 <Pressable
-                  onPress={() => void onSave()}
-                  style={styles.iconBtn}
-                  disabled={savingImage || !imageUrl}>
-                  {savingImage ? (
-                    <ActivityIndicator color={brand.orangeDeep} />
-                  ) : (
-                    <>
-                      <DownloadIcon color={brand.orangeDeep} />
-                      <Text style={styles.iconBtnLabel}>Save</Text>
-                    </>
-                  )}
-                </Pressable>
-                <Pressable
-                  onPress={() => onShare()}
-                  style={[styles.iconBtn, styles.iconBtnPrimary]}
-                  disabled={sharingImage || captionBusy}>
-                  {sharingImage ? (
+                  onPress={() => void onModify()}
+                  disabled={modifying || !modifyPrompt.trim()}
+                  style={[
+                    styles.primaryBtn,
+                    (modifying || !modifyPrompt.trim()) && styles.primaryBtnDisabled,
+                  ]}>
+                  {modifying ? (
                     <ActivityIndicator color="#FFFFFF" />
                   ) : (
-                    <>
-                      <UploadIcon color="#FFFFFF" />
-                      <Text style={styles.iconBtnLabelPrimary}>Share</Text>
-                    </>
+                    <Text style={styles.primaryLabel}>Generate image</Text>
                   )}
                 </Pressable>
-              </View>
-            </View>
-
-            <Text style={styles.section}>Remix this image</Text>
-            <Text style={styles.modifyHint}>
-              This image will be used as a reference — describe the change you want.
-            </Text>
-            <TextInput
-              value={modifyPrompt}
-              onChangeText={setModifyPrompt}
-              placeholder="e.g. Change the background to a beach at sunset"
-              placeholderTextColor={brand.mutedSoft}
-              multiline
-              style={styles.modifyInput}
-              editable={!modifying}
-            />
-            <Pressable
-              onPress={() => void onModify()}
-              disabled={modifying || !modifyPrompt.trim()}
-              style={[
-                styles.primaryBtn,
-                (modifying || !modifyPrompt.trim()) && styles.primaryBtnDisabled,
-              ]}>
-              {modifying ? (
-                <ActivityIndicator color="#FFFFFF" />
-              ) : (
-                <Text style={styles.primaryLabel}>Generate image</Text>
-              )}
-            </Pressable>
+              </Animated.View>
+            </GestureDetector>
           </>
         )}
       </KeyboardAwareScrollView>
@@ -483,6 +607,12 @@ export default function GenerationDetailScreen() {
         onClose={() => setSelectSheetMode(null)}
         urls={allImageUrls}
         mode={selectSheetMode ?? 'save'}
+      />
+
+      <ImageViewerModal
+        visible={viewerUrl !== null}
+        onClose={() => setViewerUrl(null)}
+        url={viewerUrl}
       />
     </AppScreen>
   );

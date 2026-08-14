@@ -34,6 +34,7 @@ import { PlanPickerSheet } from '@/components/profile/plan-picker-sheet';
 import { AppScreen } from '@/components/shell/app-screen';
 import { TemplateConfigureSheet } from '@/components/templates/template-configure-sheet';
 import type { Plan, PlanId } from '@/constants/plans';
+import { creditsPerImage } from '@/constants/playground';
 import { useBrandKit } from '@/hooks/use-brand-kit';
 import { useSession } from '@/hooks/use-session';
 import { useSubscription } from '@/hooks/use-subscription';
@@ -46,7 +47,7 @@ import { saveImageToGallery } from '@/lib/save-image';
 import { shareImage } from '@/lib/share-image';
 import { brandKitSwatches } from '@/services/brand-kit';
 import { fetchLatestCaption } from '@/services/generations';
-import { enhancePrompt, generateImage, uploadReferenceImage } from '@/services/playground';
+import { enhancePrompt, generateImage, uploadReferenceImage, waitForGeneration } from '@/services/playground';
 import {
   isUserCancelledPurchase,
   purchaseErrorMessage,
@@ -269,10 +270,13 @@ export default function AssistantScreen() {
     }
   };
 
+  /** Credit cost varies by model + quality, not a flat 1 credit/image. */
+  const generationCost = creditsPerImage(modelId, quality) * imageCount;
+
   /** True when client already knows generation will be blocked. */
-  const needsPlanUpgrade = (count: number) => {
+  const needsPlanUpgrade = (cost: number) => {
     if (!isPaid) return true;
-    return creditsRemaining < count;
+    return creditsRemaining < cost;
   };
 
   const runGeneration = async (params: {
@@ -291,7 +295,7 @@ export default function AssistantScreen() {
       return;
     }
 
-    if (needsPlanUpgrade(imageCount)) {
+    if (needsPlanUpgrade(generationCost)) {
       const message = !isPaid
         ? 'No active plan. Choose a plan to unlock generation.'
         : 'Not enough credits. Upgrade your plan to keep creating.';
@@ -306,7 +310,10 @@ export default function AssistantScreen() {
 
     setSending(true);
     try {
-      const result = await generateImage({
+      // Resolves fast (content checks + credit debit only) — the actual
+      // provider call runs server-side in the background, so the turn stays
+      // in its 'loading' state until waitForGeneration below reports back.
+      const { generationId, conversationId: newConversationId } = await generateImage({
         userId: user.id,
         prompt: params.prompt,
         lockedPrompt: params.lockedPrompt,
@@ -322,19 +329,29 @@ export default function AssistantScreen() {
         useBrandColors,
         modelId,
       });
-      setConversationId(result.conversationId);
-      patchAssistant(params.assistantId, {
-        status: 'done',
-        imageUrls: result.imageUrls,
-        generationId: result.generationId,
-        error: null,
-        brandKitApplied: useBrandLogo || useBrandName || useBrandColors,
-      });
-      void subscriptionQuery.refetch();
-      track('generation_success', {
-        generation_id: result.generationId,
-        aspect_ratio: params.aspectRatio,
-      });
+      setConversationId(newConversationId);
+      patchAssistant(params.assistantId, { generationId });
+
+      const outcome = await waitForGeneration(generationId);
+      if (outcome.status === 'completed') {
+        patchAssistant(params.assistantId, {
+          status: 'done',
+          imageUrls: outcome.imageUrls,
+          error: null,
+          brandKitApplied: useBrandLogo || useBrandName || useBrandColors,
+        });
+        void subscriptionQuery.refetch();
+        track('generation_success', {
+          generation_id: generationId,
+          aspect_ratio: params.aspectRatio,
+        });
+      } else {
+        const message = outcome.errorMessage ?? 'Generation failed';
+        patchAssistant(params.assistantId, { status: 'error', error: message });
+        toast(message, 'error');
+        if (isPlanUpgradeError(message)) openPlans();
+        track('generation_fail', { reason: message.slice(0, 120) });
+      }
     } catch (error) {
       const message = toUserErrorMessage(error, 'Generation failed');
       patchAssistant(params.assistantId, {
@@ -368,7 +385,7 @@ export default function AssistantScreen() {
     Keyboard.dismiss();
     setPopover(null);
 
-    if (needsPlanUpgrade(imageCount)) {
+    if (needsPlanUpgrade(generationCost)) {
       toast(
         !isPaid
           ? 'Choose a plan to start generating.'
@@ -605,7 +622,7 @@ export default function AssistantScreen() {
   }));
 
   return (
-    <AppScreen edges={[]} glowBlobs contentStyle={styles.screen}>
+    <AppScreen edges={[]} glowBlobs contentStyle={styles.screen} tabIndex={4}>
       <PlaygroundHeader
         modelId={modelId}
         onBack={() => {
@@ -701,6 +718,7 @@ export default function AssistantScreen() {
         ) : null}
         {popover === 'quality' ? (
           <QualityCountPopover
+            modelId={modelId}
             quality={quality}
             onSelectQuality={setQuality}
             imageCount={imageCount}

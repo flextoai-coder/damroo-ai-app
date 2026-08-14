@@ -30,3 +30,6 @@ verify_jwt = false
 
 [functions.cron-expire-subscriptions]
 verify_jwt = false
+
+[functions.cron-expire-stuck-generations]
+verify_jwt = false

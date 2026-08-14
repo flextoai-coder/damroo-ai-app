@@ -234,6 +234,7 @@ export default function HomeScreen() {
       {/* 4. Latest Generations by You */}
       <SectionHead title="Latest Generations by You" onViewAll={scrollToGenerations} />
       <HomeRail>
+        <NewDesignTile onPress={openPlayground} />
         {latestRailItems.map((item) => (
           <GenerationCard
             key={item.id}
@@ -243,7 +244,6 @@ export default function HomeScreen() {
             onPress={() => openGeneration(item.id)}
           />
         ))}
-        <NewDesignTile onPress={openPlayground} />
       </HomeRail>
 
       {/* 5. Festival CTA */}
@@ -289,7 +289,7 @@ export default function HomeScreen() {
   );
 
   return (
-    <AppScreen edges={[]} glowBlobs contentStyle={styles.screenContent}>
+    <AppScreen edges={[]} glowBlobs contentStyle={styles.screenContent} tabIndex={0}>
       <GenerationsGrid
         ref={listRef}
         generations={generations}

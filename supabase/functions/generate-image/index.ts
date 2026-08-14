@@ -1,11 +1,15 @@
 import 'jsr:@supabase/functions-js/edge-runtime.d.ts';
 
+import type { SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.49.1';
+
 import { autoEnhanceImagePrompt } from '../_shared/auto-enhance.ts';
 import { loadBrandPromptContext, withBrandContext } from '../_shared/brand-context.ts';
 import { checkPromptContent } from '../_shared/content-filter.ts';
+import { creditsPerImage } from '../_shared/credit-cost.ts';
 import { corsHeaders, errorResponse, jsonResponse } from '../_shared/cors.ts';
 import { callGptImage } from '../_shared/gpt-image.ts';
 import {
+  stripResolutionClaims,
   withPromptPriority,
   withReferenceRoleContext,
   withVariationContext,
@@ -47,6 +51,188 @@ function base64ToUint8Array(base64: string): Uint8Array {
     bytes[i] = binary.charCodeAt(i);
   }
   return bytes;
+}
+
+type FinishGenerationParams = {
+  service: SupabaseClient;
+  userId: string;
+  generationId: string;
+  conversationId: string;
+  references: string[];
+  productReferenceCount: number;
+  lockedPrompt: string | null;
+  autoEnhancedPrompt: string;
+  variation: 'subtle' | 'balanced' | 'bold';
+  imageCount: number;
+  aspectRatio: string;
+  quality: '2K' | '4K';
+  useBrandLogo: boolean;
+  useBrandName: boolean;
+  useBrandColors: boolean;
+  useGptImage: boolean;
+};
+
+/**
+ * Everything that can't finish inside a normal request/response window — the
+ * actual provider call, downloading/uploading assets, and finalizing the
+ * generation row. Runs via `EdgeRuntime.waitUntil` *after* the client
+ * already has the generation id back, so a slow provider call (a large
+ * multi-image Seedream batch, network variance, etc.) never risks Supabase's
+ * own request timeout. GPT Image 2 is deliberately pinned to 'medium' effort
+ * for both quality tiers (see gpt-image.ts) rather than leaning on this — its
+ * 'high' tier's ~180s runtime exceeds the Free-plan 150s ceiling on this
+ * *background* task too, so it isn't a safe way to unlock 'high'. On any
+ * failure here, credits are refunded and the generation is marked 'failed' —
+ * mirroring exactly what the old synchronous catch block did.
+ */
+async function finishGeneration(params: FinishGenerationParams): Promise<void> {
+  const { service, generationId } = params;
+  try {
+    // Brand logo first (if any and enabled), then user reference images in attachment order.
+    let referenceImages = params.references;
+    let logoPrepended = false;
+    if (params.useBrandLogo) {
+      const { data: kit } = await service
+        .from('brand_kits')
+        .select('logo_storage_path')
+        .eq('user_id', params.userId)
+        .maybeSingle();
+      if (kit?.logo_storage_path) {
+        const { data: signed } = await service.storage
+          .from('brand-assets')
+          .createSignedUrl(kit.logo_storage_path, 60 * 30);
+        if (signed?.signedUrl) {
+          referenceImages = [signed.signedUrl, ...params.references].slice(0, 14);
+          logoPrepended = true;
+        }
+      }
+    }
+
+    const brandContext = await loadBrandPromptContext(service, params.userId, {
+      includeName: params.useBrandName,
+      includeColors: params.useBrandColors,
+      includeLogo: params.useBrandLogo,
+    });
+    // Priority order: the template's locked selections always apply first
+    // (over the auto-enhanced free text), then reference image roles are
+    // spelled out — offset by one if a brand logo ended up prepended to
+    // `referenceImages`, so "the first N" still points at the actual product
+    // images and not the logo slot — then batch-variation instructions (only
+    // meaningful for imageCount > 1) — then brand kit instructions on top
+    // (the logo's own role is covered there).
+    const promptWithPriority = withPromptPriority(params.lockedPrompt, params.autoEnhancedPrompt);
+    const promptWithRoles = withReferenceRoleContext(
+      promptWithPriority,
+      params.productReferenceCount,
+      params.references.length - params.productReferenceCount,
+      logoPrepended,
+    );
+    const promptWithVariation = withVariationContext(promptWithRoles, params.variation, params.imageCount);
+    const seedreamPrompt = withBrandContext(promptWithVariation, brandContext);
+
+    let rawAssets: Array<{ bytes: Uint8Array; contentType: string }>;
+    if (params.useGptImage) {
+      const { assets: gptAssets } = await callGptImage({
+        prompt: seedreamPrompt,
+        aspectRatio: params.aspectRatio,
+        quality: params.quality,
+        imageCount: params.imageCount,
+        referenceImages,
+      });
+      rawAssets = gptAssets.map((a) => ({
+        bytes: base64ToUint8Array(a.base64),
+        contentType: a.contentType,
+      }));
+    } else {
+      const { urls } = await callSeedream({
+        prompt: seedreamPrompt,
+        aspectRatio: params.aspectRatio,
+        quality: params.quality,
+        imageCount: params.imageCount,
+        referenceImages,
+      });
+      rawAssets = [];
+      for (let i = 0; i < urls.length; i++) {
+        const downloaded = await fetch(urls[i]);
+        if (!downloaded.ok) {
+          throw new Error(`Failed to download Seedream asset ${i + 1} (status ${downloaded.status})`);
+        }
+        const contentType = downloaded.headers.get('content-type') ?? 'image/jpeg';
+        if (!contentType.startsWith('image/')) {
+          // Seedream's CDN occasionally serves a non-image response (e.g. a
+          // transient error page) with a 200 status — fail clearly here
+          // instead of letting Storage reject it later with an opaque error.
+          throw new Error(
+            `Seedream asset ${i + 1} came back as "${contentType}" instead of an image. Please try again.`,
+          );
+        }
+        rawAssets.push({
+          bytes: new Uint8Array(await downloaded.arrayBuffer()),
+          contentType,
+        });
+      }
+    }
+
+    const assets: Array<{
+      generation_id: string;
+      storage_path: string;
+      public_url: string;
+      sort_order: number;
+    }> = [];
+
+    for (let i = 0; i < rawAssets.length; i++) {
+      const { bytes, contentType } = rawAssets[i];
+      const ext = contentType.includes('png') ? 'png' : contentType.includes('webp') ? 'webp' : 'jpg';
+      const storagePath = `${params.userId}/${generationId}/${i}.${ext}`;
+
+      const { error: uploadError } = await service.storage
+        .from('generations')
+        .upload(storagePath, bytes, { contentType, upsert: true });
+      if (uploadError) throw new Error(uploadError.message);
+
+      const { data: signed, error: signError } = await service.storage
+        .from('generations')
+        .createSignedUrl(storagePath, 60 * 60 * 24 * 365);
+      if (signError || !signed?.signedUrl) {
+        throw new Error(signError?.message ?? 'Failed to sign storage URL');
+      }
+
+      assets.push({
+        generation_id: generationId,
+        storage_path: storagePath,
+        public_url: signed.signedUrl,
+        sort_order: i,
+      });
+    }
+
+    const { error: assetError } = await service.from('generation_assets').insert(assets);
+    if (assetError) throw new Error(assetError.message);
+
+    const { error: completeError } = await service
+      .from('generations')
+      .update({ status: 'completed', error_message: null })
+      .eq('id', generationId);
+    if (completeError) throw new Error(completeError.message);
+
+    await service.from('chat_messages').insert({
+      conversation_id: params.conversationId,
+      user_id: params.userId,
+      role: 'assistant',
+      content: `Generated ${assets.length} image(s)`,
+      generation_id: generationId,
+      attachments: assets.map((a) => ({ uri: a.public_url, storage_path: a.storage_path })),
+    });
+  } catch (e) {
+    const message = e instanceof Error ? e.message : 'Generation failed';
+    await service.rpc('refund_credits_for_generation', {
+      p_user_id: params.userId,
+      p_generation_id: generationId,
+    });
+    await service
+      .from('generations')
+      .update({ status: 'failed', error_message: message })
+      .eq('id', generationId);
+  }
 }
 
 Deno.serve(async (req) => {
@@ -105,16 +291,26 @@ Deno.serve(async (req) => {
     // Automatic, always-on rewrite of whatever bare/minimal prompt the user
     // typed — distinct from the client-triggered `enhance-prompt` function.
     // Runs before the generation row is created so the true final text ends
-    // up in `enhanced_prompt`, not just a manually-enhanced one.
-    const baseFreePrompt = enhanced || prompt;
+    // up in `enhanced_prompt`, not just a manually-enhanced one. Kept in the
+    // fast/synchronous path (unlike the provider call below) — it's a single
+    // text-only OpenAI call, a couple seconds at most.
+    //
+    // `stripResolutionClaims` runs on the way in (so the LLM never even sees
+    // "4K"/"1080p"/etc. to riff on) and again on the way out (catches the LLM
+    // inventing resolution language on its own, and covers the case where
+    // auto-enhance soft-fails back to the untouched input) — the real
+    // resolution is `quality` above, never anything from prompt text.
+    const baseFreePrompt = stripResolutionClaims(enhanced || prompt);
     const autoEnhancedPrompt = baseFreePrompt
-      ? await autoEnhanceImagePrompt({
-          prompt: baseFreePrompt,
-          lockedPrompt,
-          aspectRatio,
-          referenceImages: references,
-          productReferenceCount,
-        })
+      ? stripResolutionClaims(
+          await autoEnhanceImagePrompt({
+            prompt: baseFreePrompt,
+            lockedPrompt,
+            aspectRatio,
+            referenceImages: references,
+            productReferenceCount,
+          }),
+        )
       : baseFreePrompt;
 
     if (autoEnhancedPrompt !== baseFreePrompt) {
@@ -177,10 +373,17 @@ Deno.serve(async (req) => {
     }
     generationId = generation.id;
 
+    // Cost varies by model + quality tier, not a flat 1 credit/image — see
+    // creditsPerImage. The debit RPC stores whatever amount is passed here
+    // as `credits_charged`, and refund_credits_for_generation refunds
+    // exactly that amount on failure, so no other code needs to know the
+    // per-model/quality rates.
+    const creditsToCharge = creditsPerImage(body.model, quality) * imageCount;
+
     const { error: debitError } = await service.rpc('debit_credits_for_generation', {
       p_user_id: userId,
       p_generation_id: generationId,
-      p_amount: imageCount,
+      p_amount: creditsToCharge,
     });
 
     if (debitError) {
@@ -208,156 +411,37 @@ Deno.serve(async (req) => {
       attachments: references.map((uri, i) => ({ uri, order: i })),
     });
 
-    // Brand logo first (if any and enabled), then user reference images in attachment order.
-    let referenceImages = references;
-    let logoPrepended = false;
-    if (useBrandLogo) {
-      const { data: kit } = await service
-        .from('brand_kits')
-        .select('logo_storage_path')
-        .eq('user_id', userId)
-        .maybeSingle();
-      if (kit?.logo_storage_path) {
-        const { data: signed } = await service.storage
-          .from('brand-assets')
-          .createSignedUrl(kit.logo_storage_path, 60 * 30);
-        if (signed?.signedUrl) {
-          referenceImages = [signed.signedUrl, ...references].slice(0, 14);
-          logoPrepended = true;
-        }
-      }
-    }
-
-    const brandContext = await loadBrandPromptContext(service, userId, {
-      includeName: useBrandName,
-      includeColors: useBrandColors,
-      includeLogo: useBrandLogo,
-    });
-    // Priority order: the template's locked selections always apply first
-    // (over the auto-enhanced free text), then reference image roles are
-    // spelled out — offset by one if a brand logo ended up prepended to
-    // `referenceImages`, so "the first N" still points at the actual product
-    // images and not the logo slot — then batch-variation instructions (only
-    // meaningful for imageCount > 1) — then brand kit instructions on top
-    // (the logo's own role is covered there).
-    const promptWithPriority = withPromptPriority(lockedPrompt, autoEnhancedPrompt);
-    const promptWithRoles = withReferenceRoleContext(
-      promptWithPriority,
-      productReferenceCount,
-      references.length - productReferenceCount,
-      logoPrepended,
+    // Everything from here on — the actual provider call, asset upload, and
+    // finalization — runs after the response below is already on its way to
+    // the client, so this resolves in about a second regardless of provider
+    // latency. The client polls the generation row (see waitForGeneration in
+    // src/services/playground.ts) for the status change instead of waiting
+    // on this HTTP response body.
+    EdgeRuntime.waitUntil(
+      finishGeneration({
+        service,
+        userId,
+        generationId,
+        conversationId,
+        references,
+        productReferenceCount,
+        lockedPrompt,
+        autoEnhancedPrompt,
+        variation,
+        imageCount,
+        aspectRatio,
+        quality,
+        useBrandLogo,
+        useBrandName,
+        useBrandColors,
+        useGptImage: body.model === 'gpt-image-2',
+      }),
     );
-    const promptWithVariation = withVariationContext(promptWithRoles, variation, imageCount);
-    const seedreamPrompt = withBrandContext(promptWithVariation, brandContext);
-
-    const useGptImage = body.model === 'gpt-image-2';
-
-    let rawAssets: Array<{ bytes: Uint8Array; contentType: string }>;
-    if (useGptImage) {
-      const { assets: gptAssets } = await callGptImage({
-        prompt: seedreamPrompt,
-        aspectRatio,
-        quality,
-        imageCount,
-        referenceImages,
-      });
-      rawAssets = gptAssets.map((a) => ({
-        bytes: base64ToUint8Array(a.base64),
-        contentType: a.contentType,
-      }));
-    } else {
-      const { urls } = await callSeedream({
-        prompt: seedreamPrompt,
-        aspectRatio,
-        quality,
-        imageCount,
-        referenceImages,
-      });
-      rawAssets = [];
-      for (let i = 0; i < urls.length; i++) {
-        const downloaded = await fetch(urls[i]);
-        if (!downloaded.ok) {
-          throw new Error(`Failed to download Seedream asset ${i + 1} (status ${downloaded.status})`);
-        }
-        const contentType = downloaded.headers.get('content-type') ?? 'image/jpeg';
-        if (!contentType.startsWith('image/')) {
-          // Seedream's CDN occasionally serves a non-image response (e.g. a
-          // transient error page) with a 200 status — fail clearly here
-          // instead of letting Storage reject it later with an opaque error.
-          throw new Error(
-            `Seedream asset ${i + 1} came back as "${contentType}" instead of an image. Please try again.`,
-          );
-        }
-        rawAssets.push({
-          bytes: new Uint8Array(await downloaded.arrayBuffer()),
-          contentType,
-        });
-      }
-    }
-
-    const assets: Array<{
-      generation_id: string;
-      storage_path: string;
-      public_url: string;
-      sort_order: number;
-    }> = [];
-
-    for (let i = 0; i < rawAssets.length; i++) {
-      const { bytes, contentType } = rawAssets[i];
-      const ext = contentType.includes('png') ? 'png' : contentType.includes('webp') ? 'webp' : 'jpg';
-      const storagePath = `${userId}/${generationId}/${i}.${ext}`;
-
-      const { error: uploadError } = await service.storage
-        .from('generations')
-        .upload(storagePath, bytes, { contentType, upsert: true });
-      if (uploadError) throw new Error(uploadError.message);
-
-      const { data: signed, error: signError } = await service.storage
-        .from('generations')
-        .createSignedUrl(storagePath, 60 * 60 * 24 * 365);
-      if (signError || !signed?.signedUrl) {
-        throw new Error(signError?.message ?? 'Failed to sign storage URL');
-      }
-
-      assets.push({
-        generation_id: generationId,
-        storage_path: storagePath,
-        public_url: signed.signedUrl,
-        sort_order: i,
-      });
-    }
-
-    const { error: assetError } = await service.from('generation_assets').insert(assets);
-    if (assetError) throw new Error(assetError.message);
-
-    const { data: completed, error: completeError } = await service
-      .from('generations')
-      .update({ status: 'completed', error_message: null })
-      .eq('id', generationId)
-      .select('*, generation_assets(*)')
-      .single();
-    if (completeError) throw new Error(completeError.message);
-
-    await service.from('chat_messages').insert({
-      conversation_id: conversationId,
-      user_id: userId,
-      role: 'assistant',
-      content: `Generated ${assets.length} image(s)`,
-      generation_id: generationId,
-      attachments: assets.map((a) => ({ uri: a.public_url, storage_path: a.storage_path })),
-    });
-
-    const sorted = {
-      ...completed,
-      generation_assets: [...(completed.generation_assets ?? [])].sort(
-        (a: { sort_order: number }, b: { sort_order: number }) => a.sort_order - b.sort_order,
-      ),
-    };
 
     return jsonResponse({
-      generation: sorted,
+      generation_id: generationId,
       conversation_id: conversationId,
-      assets: sorted.generation_assets,
+      status: 'pending',
     });
   } catch (e) {
     const message = e instanceof Error ? e.message : 'Generation failed';

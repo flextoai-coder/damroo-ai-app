@@ -15,19 +15,29 @@ type EnhanceResponse = {
 };
 
 type GenerateImageResponse = {
-  generation: {
-    id: string;
-    status: string;
-    generation_assets?: Array<{
-      public_url: string | null;
-      storage_path: string;
-      sort_order: number;
-    }>;
-  };
+  generation_id: string;
   conversation_id: string;
-  assets?: Array<{ public_url: string | null }>;
+  status: string;
   error?: string;
 };
+
+export type GenerationOutcome = {
+  status: 'completed' | 'failed';
+  imageUrls: string[];
+  errorMessage: string | null;
+};
+
+const POLL_INTERVAL_MS = 2500;
+/**
+ * Generous ceiling — both providers normally finish well under a minute
+ * (GPT Image 2 is pinned to 'medium' effort for every quality tier, see
+ * gpt-image.ts), this just leaves headroom for a slow multi-image batch or
+ * network variance. The server has its own stuck-generation sweep
+ * (cron-expire-stuck-generations) that refunds credits if something never
+ * finishes at all — this timeout is purely about not leaving the UI
+ * spinning forever in that case, not about matching a real provider ceiling.
+ */
+const POLL_TIMEOUT_MS = 6 * 60_000;
 
 /**
  * Calls the enhance-prompt Edge Function (OpenAI, vision-capable). Considers
@@ -172,10 +182,8 @@ export async function generateImage(params: {
   /** Which generation model to use — defaults to Seedream 4.5 server-side. */
   modelId?: string;
 }): Promise<{
-  imageUrl: string | null;
   generationId: string;
   conversationId: string;
-  imageUrls: string[];
 }> {
   const modelAttachments = modelReferenceAttachments(params.attachments ?? []);
   const referenceImages = await resolveReferenceUrls(params.userId, modelAttachments);
@@ -185,6 +193,12 @@ export async function generateImage(params: {
   // separate per-image role field.
   const productReferenceCount = modelAttachments.filter((a) => a.kind === 'product').length;
 
+  // The edge function only does the fast, synchronous part inline (content
+  // checks, credit debit, row creation) and returns immediately — the actual
+  // provider call runs in the background (see generate-image/index.ts's
+  // `EdgeRuntime.waitUntil`), so this resolves in roughly a second regardless
+  // of how long the image itself takes. `waitForGeneration` below picks up
+  // from here.
   const data = await invokeFunction<GenerateImageResponse>('generate-image', {
     prompt: params.prompt,
     locked_prompt: params.lockedPrompt ?? null,
@@ -203,16 +217,57 @@ export async function generateImage(params: {
     model: params.modelId,
   });
 
-  const assets = data.assets ?? data.generation?.generation_assets ?? [];
-  const imageUrls = assets
-    .map((a) => a.public_url)
-    .filter((u): u is string => Boolean(u));
+  return {
+    generationId: data.generation_id,
+    conversationId: data.conversation_id,
+  };
+}
+
+/**
+ * Polls a generation row until the background provider call finishes, one
+ * way or another. A single failed/network-flaky poll doesn't give up early —
+ * it keeps retrying until `POLL_TIMEOUT_MS`, since the generation itself is
+ * still running server-side regardless of whether any one read succeeds.
+ */
+export async function waitForGeneration(generationId: string): Promise<GenerationOutcome> {
+  const deadline = Date.now() + POLL_TIMEOUT_MS;
+
+  while (Date.now() < deadline) {
+    try {
+      const { data, error } = await supabase
+        .from('generations')
+        .select('status, error_message, generation_assets(public_url, sort_order)')
+        .eq('id', generationId)
+        .single();
+
+      if (!error && data) {
+        if (data.status === 'completed') {
+          const imageUrls = [...(data.generation_assets ?? [])]
+            .sort((a, b) => a.sort_order - b.sort_order)
+            .map((a) => a.public_url)
+            .filter((u): u is string => Boolean(u));
+          return { status: 'completed', imageUrls, errorMessage: null };
+        }
+        if (data.status === 'failed') {
+          return {
+            status: 'failed',
+            imageUrls: [],
+            errorMessage: data.error_message ?? 'Generation failed',
+          };
+        }
+      }
+    } catch {
+      // Transient network blip — the generation keeps running server-side
+      // either way, so just retry on the next tick instead of giving up.
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL_MS));
+  }
 
   return {
-    imageUrl: imageUrls[0] ?? null,
-    generationId: data.generation.id,
-    conversationId: data.conversation_id,
-    imageUrls,
+    status: 'failed',
+    imageUrls: [],
+    errorMessage: 'This is taking longer than expected — check back in a moment.',
   };
 }
 

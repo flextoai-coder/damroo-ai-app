@@ -67,7 +67,7 @@ export default function TemplatesScreen() {
   };
 
   return (
-    <AppScreen edges={[]} glowBlobs contentStyle={styles.screen}>
+    <AppScreen edges={[]} glowBlobs contentStyle={styles.screen} tabIndex={1}>
       <ScrollView
         ref={scrollRef}
         {...scrollProps}

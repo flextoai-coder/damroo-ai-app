@@ -104,7 +104,9 @@
         {
           "photosPermission": false,
           "savePhotosPermission": "Damroo AI saves your generated images to your photos.",
-          "granularPermissions": ["photo"]
+          "granularPermissions": [
+            "photo"
+          ]
         }
       ],
       "expo-system-ui",
@@ -115,7 +117,8 @@
           "hidden": false,
           "enforceContrast": false
         }
-      ]
+      ],
+      "expo-image"
     ],
     "experiments": {
       "typedRoutes": true,

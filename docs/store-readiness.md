@@ -70,6 +70,24 @@ Header: `x-cron-secret: <CRON_SECRET>`
 
 Zeros credits and marks plans expired after `current_period_end` (no rollover).
 
+## Cron — expire stuck generations
+
+`generate-image` runs the actual Seedream/GPT Image call in the background
+(`EdgeRuntime.waitUntil`) after responding to the client, so the client polls
+the row for completion instead of waiting on the HTTP response. If that
+background task ever gets killed before finishing — Supabase's background-task
+ceiling (150s Free / 400s paid), a provider hang, anything — the row is stuck
+at `pending` forever with credits already debited and never refunded.
+
+Schedule a POST every 10–15 minutes to:
+
+`https://thvqecpkurkzcmkdqzki.supabase.co/functions/v1/cron-expire-stuck-generations`
+
+Header: `x-cron-secret: <CRON_SECRET>` (same secret as above)
+
+Marks anything still `pending` after 10 minutes as `failed` and refunds its
+credits — idempotent, safe to run as often as you like.
+
 ## Edge secrets checklist
 
 - `ARK_API_KEY` (+ optional `ARK_BASE_URL`, `ARK_MODEL`)

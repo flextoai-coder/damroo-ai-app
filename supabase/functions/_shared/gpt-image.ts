@@ -49,9 +49,16 @@ export async function callGptImage(params: {
   if (!apiKey) throw new Error('OPENAI_API_KEY is not configured');
 
   const model = Deno.env.get('OPENAI_IMAGE_MODEL') ?? DEFAULT_MODEL;
-  // 'high' regularly takes ~180s per image — well past Supabase's 150s edge
-  // function request timeout. 'medium' runs ~50s and leaves headroom for the
-  // rest of the request (content filter, DB writes, storage upload).
+  // 'high' regularly takes ~180s per image. `generate-image/index.ts` runs
+  // this via `EdgeRuntime.waitUntil`, which on paid Supabase plans gets a
+  // 400s background-task ceiling (180s fits fine) — but on the Free plan
+  // that ceiling is only 150s, so a 'high'-quality run gets silently killed
+  // mid-flight: no error, no refund, the generation row just sits at
+  // 'pending' forever. Stay on 'medium' (~50s, well inside 150s) for both
+  // quality tiers until this project is confirmed on a paid plan — the 4K
+  // *pixel size* (sizeForAspectGptImage below) is unaffected either way,
+  // this only trades OpenAI's internal render effort. `OPENAI_IMAGE_QUALITY`
+  // remains an override for whoever re-enables 'high' after upgrading.
   const renderQuality = Deno.env.get('OPENAI_IMAGE_QUALITY') ?? 'medium';
   const size = sizeForAspectGptImage(params.aspectRatio, params.quality);
   const prompt = `${params.prompt}\n\nAspect ratio: ${params.aspectRatio}.`;

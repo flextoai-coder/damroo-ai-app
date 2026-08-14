@@ -88,3 +88,12 @@ export function formatById(id: string): PlaygroundFormat {
 export function modelById(id: string): PlaygroundModel {
   return PLAYGROUND_MODELS.find((m) => m.id === id) ?? PLAYGROUND_MODELS[0];
 }
+
+/** Mirrors `creditsPerImage` in supabase/functions/_shared/credit-cost.ts — keep in sync. */
+export function creditsPerImage(modelId: string, quality: '2K' | '4K'): number {
+  if (modelId === 'gpt-image-2') {
+    return quality === '4K' ? 60 : 25;
+  }
+  // Seedream 4.5 (default model).
+  return quality === '4K' ? 50 : 20;
+}

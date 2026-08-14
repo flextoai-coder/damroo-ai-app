@@ -149,7 +149,7 @@ export default function BrandKitScreen() {
   };
 
   return (
-    <AppScreen edges={[]} glowBlobs contentStyle={styles.screen}>
+    <AppScreen edges={[]} glowBlobs contentStyle={styles.screen} tabIndex={2}>
       <ScrollView
         ref={scrollRef}
         {...scrollProps}

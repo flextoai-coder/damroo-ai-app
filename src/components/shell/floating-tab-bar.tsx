@@ -91,6 +91,7 @@ export function FloatingTabBar({ state, navigation }: FloatingTabBarProps) {
   const tabBarVisible = useTabShellStore((s) => s.tabBarVisible);
   const setFabOpen = useTabShellStore((s) => s.setFabOpen);
   const toggleFab = useTabShellStore((s) => s.toggleFab);
+  const setActiveTabIndex = useTabShellStore((s) => s.setActiveTabIndex);
   const [captionsPickerOpen, setCaptionsPickerOpen] = useState(false);
   const [productPickerOpen, setProductPickerOpen] = useState(false);
 
@@ -116,6 +117,12 @@ export function FloatingTabBar({ state, navigation }: FloatingTabBarProps) {
   useEffect(() => {
     setFabOpen(false);
   }, [state.index, setFabOpen]);
+
+  // Single source of truth for each screen's own slide transition — see
+  // `AppScreen`'s `tabIndex` prop.
+  useEffect(() => {
+    setActiveTabIndex(state.index);
+  }, [state.index, setActiveTabIndex]);
 
   const shellStyle = useAnimatedStyle(() => ({
     transform: [{ translateY: interpolate(hideProgress.value, [0, 1], [0, HIDE_OFFSET]) }],

@@ -39,9 +39,13 @@ Do not use outdated Expo patterns or APIs from memory.
 
 ## Credits & plans (locked)
 
-- **1 credit = 1 image** · **₹10 / credit** · **no rollover**
-- Starter ₹5,000 → 500 credits · Growth ₹10,000 → 1,000 · Scale ₹20,000 → 2,000 (monthly)
-- Debit **before** generation; refund on provider failure (idempotent)
+- **1 credit = ₹1** · **no rollover**
+- Starter ₹999 → 999 credits · Growth ₹4,999 → 4,999 credits · Scale ₹9,999 → 9,999 credits (monthly)
+- Credit cost per generation varies by model + quality tier, not a flat 1 credit/image:
+  - Seedream 4.5 — 2K: 20 credits · 4K: 50 credits
+  - GPT Image 2 — 2K (`medium`): 25 credits · 4K (`high`): 60 credits
+  - Multiplied by `image_count` for multi-image batches. See `creditsPerImage` in `src/constants/playground.ts` (client) and `supabase/functions/_shared/credit-cost.ts` (server, authoritative) — keep both in sync.
+- Debit **as generation starts** (row created + marked `processing`, before the provider call runs); refund on provider failure (idempotent)
 - Period end without renew → credits go to **0**
 
 ---

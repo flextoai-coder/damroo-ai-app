@@ -204,7 +204,7 @@ export function PlanPickerSheet({
 
             <View style={styles.header}>
               <Text style={styles.title}>Choose your plan</Text>
-              <Text style={styles.subtitle}>1 credit = 1 image · No rollover</Text>
+              <Text style={styles.subtitle}>Credit cost varies by model & quality · No rollover</Text>
             </View>
 
             <AnimatedFlatList

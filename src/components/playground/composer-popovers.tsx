@@ -20,6 +20,7 @@ import {
 } from '@/components/playground/icons';
 import { brand } from '@/constants/brand';
 import {
+  creditsPerImage,
   MAX_IMAGE_COUNT,
   MIN_IMAGE_COUNT,
   PLAYGROUND_FORMATS,
@@ -317,6 +318,7 @@ export function FormatPopover({ activeId, onSelect }: FormatPopoverProps) {
 }
 
 type QualityCountPopoverProps = {
+  modelId: string;
   quality: '2K' | '4K';
   onSelectQuality: (quality: '2K' | '4K') => void;
   imageCount: number;
@@ -326,6 +328,7 @@ type QualityCountPopoverProps = {
 };
 
 export function QualityCountPopover({
+  modelId,
   quality,
   onSelectQuality,
   imageCount,
@@ -334,6 +337,7 @@ export function QualityCountPopover({
   onSelectVariation,
 }: QualityCountPopoverProps) {
   const variationEnabled = imageCount > 1;
+  const totalCredits = creditsPerImage(modelId, quality) * imageCount;
 
   return (
     <View>
@@ -382,7 +386,7 @@ export function QualityCountPopover({
           <Text style={styles.stepperGlyph}>+</Text>
         </Pressable>
         <Text style={styles.stepperHint}>
-          {imageCount} credit{imageCount > 1 ? 's' : ''} for this generation
+          {totalCredits} credit{totalCredits > 1 ? 's' : ''} for this generation
         </Text>
       </View>
 

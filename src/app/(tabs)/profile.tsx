@@ -208,7 +208,7 @@ export default function ProfileScreen() {
   };
 
   return (
-    <AppScreen edges={[]} glowBlobs contentStyle={styles.screen}>
+    <AppScreen edges={[]} glowBlobs contentStyle={styles.screen} tabIndex={3}>
       <ScrollView
         ref={scrollRef}
         {...scrollProps}

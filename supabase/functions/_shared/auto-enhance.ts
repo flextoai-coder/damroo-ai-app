@@ -65,7 +65,7 @@ Adapt the template to what's actually being photographed:
 CASE B — it is a graphic design / poster / banner / illustration / flat-lay / typography-driven creative, not a literal photograph:
 Do NOT force the template above onto it. Instead, lightly polish the original prompt only — add composition, lighting, and material detail appropriate for a premium marketing creative, keep it concise, and keep the user's core intent and layout unchanged. Do not turn it into a photorealistic photograph structure.
 
-In both cases: never contradict or override any "mandatory template" instructions given to you as separate context below — treat those as fixed and build only around them. Return ONLY the final prompt text — no preamble, no explanation, no markdown, no quotes, no case labels.`;
+In both cases: never contradict or override any "mandatory template" instructions given to you as separate context below — treat those as fixed and build only around them. The output resolution is controlled entirely by a separate system parameter, not by anything in this prompt — never mention or imply a specific resolution or pixel-density tier (e.g. "4K", "1080p", "ultra HD") anywhere in your output, even as a stylistic flourish; generic quality language like "sharp" or "high detail" is fine. Return ONLY the final prompt text — no preamble, no explanation, no markdown, no quotes, no case labels.`;
 
 /**
  * Rewrites `prompt` per the rules above. Soft-fails to the original prompt

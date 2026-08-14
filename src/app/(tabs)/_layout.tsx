@@ -1,7 +1,6 @@
 import { Tabs } from 'expo-router';
 
 import { FloatingTabBar } from '@/components/shell/floating-tab-bar';
-import { tabSlideInterpolator, tabSlideTransitionSpec } from '@/constants/tab-transition';
 
 export default function TabsLayout() {
   return (
@@ -10,9 +9,14 @@ export default function TabsLayout() {
       screenOptions={{
         headerShown: false,
         sceneStyle: { backgroundColor: '#FBEEE0' },
-        // Directional slide between tabs — feels swipeable, based on tab order.
-        sceneStyleInterpolator: tabSlideInterpolator,
-        transitionSpec: tabSlideTransitionSpec,
+        // No navigator-level transition — the directional slide is owned
+        // entirely by AppScreen's own Reanimated transform (see its
+        // `tabIndex` prop). Leaving this navigator animation enabled would
+        // keep react-native-screens' native attach/detach state
+        // (`activityState`) driven by React Navigation's own internal
+        // Animated value, which is the thing that was getting stuck and
+        // leaving screens blank in the first place.
+        animation: 'none',
         // Floating custom bar — height 0 so the navigator doesn't reserve a
         // bottom strip (that empty band was shrinking the Android viewport).
         tabBarStyle: {

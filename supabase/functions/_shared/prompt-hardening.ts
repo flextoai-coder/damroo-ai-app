@@ -1,5 +1,5 @@
 /**
- * Enforces two guarantees the client can't be trusted to enforce itself by
+ * Enforces guarantees the client can't be trusted to enforce itself by
  * merely arranging text in the composer UI:
  *
  * 1. A template's guided-flow selections (pose, angle, style, etc.) are
@@ -9,7 +9,36 @@
  *    preserved as-is (it's what gets swapped into the scene), while
  *    everything else is a flexible supporting reference (face, background,
  *    or whatever the prompt directs).
+ * 3. The actual output resolution is whatever the app's own `quality` config
+ *    says (2K/4K, a fixed pixel-size table per provider) — never anything
+ *    the user typed. A prompt mentioning "4K" while the config says 2K must
+ *    not sway the model, even stylistically.
  */
+
+/**
+ * The real output resolution comes entirely from the app's `quality` config
+ * (see gpt-image.ts / seedream.ts's size tables) — never from prompt text.
+ * Strips explicit resolution/pixel-density claims (e.g. "4K", "1080p",
+ * "ultra HD") out of user-authored text before it ever reaches an LLM or the
+ * image model, so "generate this in 4K" typed while the config is set to 2K
+ * can't make either provider lean toward a resolution the API call was never
+ * actually asked for. Deliberately narrow — only strips explicit
+ * resolution/pixel tokens, not generic quality language like "sharp" or
+ * "high detail", which don't specify a resolution and are harmless at any
+ * tier. Apply this at every point user-authored text enters the pipeline; it
+ * doesn't depend on the auto-enhance LLM step (which soft-fails to the
+ * untouched original prompt on any error) reliably following an instruction.
+ */
+export function stripResolutionClaims(prompt: string): string {
+  return prompt
+    .replace(/\b\d{3,4}p\b/gi, '')
+    .replace(/\b[248]k\b/gi, '')
+    .replace(/\b(ultra|full)[\s-]?hd\b/gi, '')
+    .replace(/\bhigh[\s-]?definition\b/gi, '')
+    .replace(/[ \t]{2,}/g, ' ')
+    .replace(/\s+([.,;!?])/g, '$1')
+    .trim();
+}
 
 /**
  * Combines a template's locked instruction text with the user's free-text

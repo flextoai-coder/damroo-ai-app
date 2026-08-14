@@ -5,6 +5,7 @@
   },
   "build": {
     "development": {
+      "node": "24.13.0",
       "developmentClient": true,
       "distribution": "internal",
       "ios": {
@@ -18,6 +19,7 @@
       }
     },
     "preview": {
+      "node": "24.13.0",
       "distribution": "internal",
       "ios": {
         "simulator": false
@@ -30,6 +32,7 @@
       }
     },
     "production": {
+      "node": "24.13.0",
       "autoIncrement": true,
       "ios": {
         "resourceClass": "m-medium"
@@ -45,7 +48,7 @@
   "submit": {
     "production": {
       "ios": {
-        "ascAppId": "REPLACE_WITH_APP_STORE_CONNECT_APP_ID"
+        "ascAppId": "6800558340"
       },
       "android": {
         "serviceAccountKeyPath": "./secrets/play-service-account.json",
