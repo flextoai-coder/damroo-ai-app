@@ -179,7 +179,7 @@ export async function generateImage(params: {
   useBrandName?: boolean;
   /** Apply the brand kit color palette to the generation prompt. Off by default. */
   useBrandColors?: boolean;
-  /** Which generation model to use — defaults to Seedream 4.5 server-side. */
+  /** Which generation model to use — defaults to GPT Image 2 server-side. */
   modelId?: string;
 }): Promise<{
   generationId: string;

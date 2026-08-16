@@ -77,6 +77,57 @@ export function primaryAssetUrl(generation: Generation): string | null {
   return asset?.public_url ?? null;
 }
 
+const EXPIRY_RETENTION_MS = 7 * 24 * 60 * 60_000;
+const EXPIRY_WARNING_THRESHOLD_MS = 5 * 24 * 60 * 60_000;
+
+/**
+ * True once a completed generation is 5+ days old but its assets haven't
+ * been purged yet by the daily retention sweep. Gates on `status` first —
+ * `pending`/`processing`/`failed` generations also have zero assets for
+ * unrelated reasons and must never be mistaken for "expiring soon."
+ * Elapsed-ms based (not calendar-day math) to avoid timezone edge cases.
+ */
+export function isExpiringSoon(generation: Generation): boolean {
+  if (generation.status !== 'completed' || generation.generation_assets.length === 0) {
+    return false;
+  }
+  return Date.now() - new Date(generation.created_at).getTime() >= EXPIRY_WARNING_THRESHOLD_MS;
+}
+
+/** True once a completed generation's assets have been purged by the daily retention sweep. */
+export function isPurged(generation: Generation): boolean {
+  return generation.status === 'completed' && generation.generation_assets.length === 0;
+}
+
+/** The date the daily retention sweep is expected to purge this generation's assets. */
+export function expiryDate(generation: Generation): Date {
+  return new Date(new Date(generation.created_at).getTime() + EXPIRY_RETENTION_MS);
+}
+
+/** Completed generations that are 5+ days old and not yet purged — surfaced in the expiring-soon notice. */
+export async function fetchExpiringSoonGenerations(userId: string): Promise<Generation[]> {
+  const cutoff = new Date(Date.now() - EXPIRY_WARNING_THRESHOLD_MS).toISOString();
+
+  const { data, error } = await supabase
+    .from('generations')
+    .select('*, generation_assets!inner(*)')
+    .eq('user_id', userId)
+    .eq('status', 'completed')
+    .lte('created_at', cutoff)
+    .order('created_at', { ascending: true });
+
+  if (error) {
+    throw error;
+  }
+
+  return (data ?? []).map((row) => ({
+    ...row,
+    generation_assets: [...(row.generation_assets ?? [])].sort(
+      (a, b) => a.sort_order - b.sort_order,
+    ),
+  }));
+}
+
 export type CaptionableGeneration = Generation & { hasCaption: boolean };
 
 /** Completed generations plus whether each already has a caption on file. */
@@ -88,7 +139,9 @@ export async function fetchGenerationsForCaptioning(
 
   const { data, error } = await supabase
     .from('generations')
-    .select('*, generation_assets(*), captions(id)')
+    // !inner — a generation whose assets were purged by the retention sweep
+    // can't be captioned, so it shouldn't be offered here.
+    .select('*, generation_assets!inner(*), captions(id)')
     .eq('user_id', userId)
     .eq('status', 'completed')
     .order('created_at', { ascending: false })

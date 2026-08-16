@@ -36,21 +36,32 @@ export function TemplateStepOptionCard({
         </View>
       ) : null}
 
-      <View style={styles.thumbWrap}>
-        {option.thumbnailUrl ? (
-          <Image
-            source={{ uri: resizedImageUrl(option.thumbnailUrl, { width: THUMB_SIZE, height: THUMB_SIZE }) }}
-            style={styles.thumb}
-            contentFit="cover"
-          />
-        ) : (
-          <View style={[styles.thumb, styles.thumbPlaceholder]} />
-        )}
-      </View>
-
-      <Text style={styles.label} numberOfLines={1}>
-        {option.label}
-      </Text>
+      {option.thumbnailUrl ? (
+        <>
+          <View style={styles.thumbWrap}>
+            <Image
+              source={{
+                uri: resizedImageUrl(option.thumbnailUrl, { width: THUMB_SIZE, height: THUMB_SIZE }),
+              }}
+              style={styles.thumb}
+              contentFit="cover"
+            />
+          </View>
+          <Text style={styles.label} numberOfLines={1}>
+            {option.label}
+          </Text>
+        </>
+      ) : (
+        // No thumbnail in the JSON blob — a blank placeholder box reads as a
+        // broken/missing image, so show a text-only card instead. Keeps the
+        // same square footprint as the image cards so a 2-up grid mixing
+        // both kinds still lines up.
+        <View style={[styles.thumbWrap, styles.textOnlyWrap]}>
+          <Text style={styles.textOnlyLabel} numberOfLines={4}>
+            {option.label}
+          </Text>
+        </View>
+      )}
     </Pressable>
   );
 }
@@ -90,8 +101,17 @@ const styles = StyleSheet.create({
     width: '100%',
     height: '100%',
   },
-  thumbPlaceholder: {
+  textOnlyWrap: {
     backgroundColor: brand.orangeSoft,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 10,
+  },
+  textOnlyLabel: {
+    fontSize: 14,
+    fontWeight: '800',
+    color: brand.orangeDeep,
+    textAlign: 'center',
   },
   label: {
     marginTop: 8,

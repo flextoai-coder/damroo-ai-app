@@ -96,6 +96,14 @@ export function FloatingTabBar({ state, navigation }: FloatingTabBarProps) {
   const [productPickerOpen, setProductPickerOpen] = useState(false);
 
   const hideProgress = useSharedValue(0);
+  // "Generate Image" / "Generate Captions" action pills — always mounted
+  // (see the `actionsRow` View below), never conditionally created/torn
+  // down in step with this animation. `fabProgress` is purely cosmetic
+  // (opacity/scale/position); the pills' actual interactivity is driven by
+  // `pointerEvents={fabOpen ? 'box-none' : 'none'}` directly off `fabOpen`
+  // every render, so it can't lag behind — no matter how many times the FAB
+  // gets tapped in a row, or how fast — an animation that's still catching
+  // up, was interrupted, or never got a chance to run in the first place.
   const fabProgress = useSharedValue(0);
 
   useEffect(() => {
@@ -106,7 +114,9 @@ export function FloatingTabBar({ state, navigation }: FloatingTabBarProps) {
   }, [tabBarVisible, hideProgress]);
 
   useEffect(() => {
-    // One soft overshoot on open (Easing.back), quick ease on close — no multi-bounce spring.
+    // One soft overshoot on open (Easing.back), quick ease on close — no
+    // multi-bounce spring. Purely visual now — nothing downstream waits on
+    // this finishing, so there's no callback and nothing to interrupt.
     fabProgress.value = withTiming(fabOpen ? 1 : 0, {
       duration: fabOpen ? 380 : 200,
       easing: fabOpen ? Easing.out(Easing.back(1.35)) : Easing.in(Easing.cubic),
@@ -213,7 +223,10 @@ export function FloatingTabBar({ state, navigation }: FloatingTabBarProps) {
       <Animated.View
         pointerEvents="box-none"
         style={[styles.dock, { paddingBottom: bottomPad }, shellStyle]}>
-        {/* Absolute — must not consume vertical space or the glass bar floats mid-screen. */}
+        {/* Absolute — must not consume vertical space or the glass bar floats mid-screen.
+            Always mounted (see `fabProgress` comment above) — interactivity
+            comes entirely from `pointerEvents` below, not from whether this
+            view exists. */}
         <View
           pointerEvents={fabOpen ? 'box-none' : 'none'}
           style={[styles.actionsRow, { bottom: BAR_HEIGHT + bottomPad + 14 }]}>

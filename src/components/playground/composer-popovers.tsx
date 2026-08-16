@@ -1,13 +1,21 @@
 import { BlurView } from 'expo-blur';
-import { useEffect, useState, type ReactNode } from 'react';
-import { Platform, Pressable, StyleSheet, Switch, Text, View } from 'react-native';
+import { useEffect, type ReactNode } from 'react';
+import {
+  Platform,
+  Pressable,
+  StyleSheet,
+  Switch,
+  Text,
+  useWindowDimensions,
+  View,
+} from 'react-native';
 import { useReanimatedKeyboardAnimation } from 'react-native-keyboard-controller';
 import Animated, {
-  runOnJS,
   useAnimatedStyle,
   useSharedValue,
   withTiming,
 } from 'react-native-reanimated';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import {
   BrandIcon,
@@ -58,29 +66,24 @@ export function ComposerPopoverShell({
   children,
   composerHeight,
 }: PopoverShellProps) {
-  const [mounted, setMounted] = useState(visible);
-  const [trackedVisible, setTrackedVisible] = useState(visible);
+  // Always mounted (the caller already renders this shell unconditionally —
+  // only `visible` and `children` change) — no mount/unmount lifecycle at
+  // all, so there's nothing for a fast/repeated tap to race against. The
+  // `progress` animation below is purely cosmetic (fade/scale); it never
+  // gates whether anything is interactive. That's `pointerEvents` below,
+  // computed directly and synchronously from `visible` on every render —
+  // it can never lag behind an animation that got interrupted, cancelled,
+  // or simply hasn't finished yet, because it was never waiting on one.
   const progress = useSharedValue(visible ? 1 : 0);
+  const { height: screenHeight } = useWindowDimensions();
+  const insets = useSafeAreaInsets();
   // `height` is <= 0 (it's the amount content should translate up by) — negate
   // it to get extra bottom padding so the sheet clears the keyboard as it rises,
   // without needing to dismiss the keyboard first.
   const { height: kbHeight } = useReanimatedKeyboardAnimation();
 
-  // Adjust mounted state during render when `visible` flips true, so the
-  // sheet is present before the effect below starts animating it in.
-  if (visible !== trackedVisible) {
-    setTrackedVisible(visible);
-    if (visible) setMounted(true);
-  }
-
   useEffect(() => {
-    if (visible) {
-      progress.value = withTiming(1, { duration: 200 });
-    } else {
-      progress.value = withTiming(0, { duration: 160 }, (finished) => {
-        if (finished) runOnJS(setMounted)(false);
-      });
-    }
+    progress.value = withTiming(visible ? 1 : 0, { duration: visible ? 200 : 160 });
   }, [visible, progress]);
 
   const sheetStyle = useAnimatedStyle(() => ({
@@ -95,22 +98,35 @@ export function ComposerPopoverShell({
     paddingBottom: composerHeight + 10 - kbHeight.value,
   }));
 
-  if (!mounted) return null;
+  // Caps the popover's own height to whatever room is actually left above
+  // the composer once the keyboard (if up) has eaten into the screen —
+  // without this, a tall popover (e.g. quality/count/variation) can render
+  // partly off the top of the screen with no way to reach its lower content.
+  // Recomputed live off the same keyboard shared value the wrapper's padding
+  // uses, so it tracks the keyboard's rise/fall frame-for-frame.
+  const scrollMaxHeightStyle = useAnimatedStyle(() => ({
+    maxHeight: Math.max(
+      140,
+      screenHeight - insets.top - composerHeight - -kbHeight.value - 24,
+    ),
+  }));
 
   return (
     <View style={styles.layer} pointerEvents="box-none">
-      {visible ? (
-        // Mounted only while actually visible, not for the whole `mounted`
-        // (open + closing-fade) window — otherwise it keeps swallowing taps
-        // once a popover starts closing (including a tap meant to open a
-        // *different* popover). This must be a mount/unmount, not a
-        // `pointerEvents` toggle on a persistent node: RN/Fabric can cache
-        // hit-testing on a view and fail to reliably re-enable it once
-        // `pointerEvents` flips back to `'auto'`, which left the scrim stuck
-        // un-tappable (popovers would open but the "tap outside to close"
-        // affordance stopped working) after the first open/close cycle.
-        <Pressable style={styles.scrim} onPress={onClose} accessibilityLabel="Dismiss" />
-      ) : null}
+      {/* Always mounted, not conditionally rendered on `visible` — a
+          persistent node whose `pointerEvents` is recomputed fresh every
+          render directly from `visible` is the reliable form of this;
+          mounting/unmounting it in step with an animation is what let a
+          fast tap land in the gap between "should be interactive" and
+          "animation caught up." Opacity (via `scrimStyle`, if this needs
+          one later) never blocks touches on its own — `pointerEvents` is
+          the only thing that does, so it's set directly, every render. */}
+      <Pressable
+        style={styles.scrim}
+        onPress={onClose}
+        accessibilityLabel="Dismiss"
+        pointerEvents={visible ? 'auto' : 'none'}
+      />
       <Animated.View
         style={[styles.sheetWrap, sheetWrapStyle]}
         // `sheetWrap`'s bottom padding reserves empty space so the visible
@@ -121,9 +137,22 @@ export function ComposerPopoverShell({
         // including a second tap on the same button meant to close the
         // popover — before it can reach the scrim or the button underneath.
         pointerEvents="box-none">
-        <Animated.View style={sheetStyle}>
+        <Animated.View
+          style={sheetStyle}
+          // Same principle as the scrim above: derived straight from
+          // `visible`, every render — never from whether the fade
+          // animation has caught up. A tap can never land on an invisible-
+          // but-still-hit-testable leftover of a popover that's already
+          // supposed to be closed, no matter how many times it's been
+          // opened/closed/re-opened in quick succession.
+          pointerEvents={visible ? 'auto' : 'none'}>
           <BlurView intensity={POPOVER_BLUR_INTENSITY} tint="light" style={styles.sheet}>
-            {children}
+            <Animated.ScrollView
+              style={scrollMaxHeightStyle}
+              showsVerticalScrollIndicator={false}
+              bounces={false}>
+              {children}
+            </Animated.ScrollView>
           </BlurView>
         </Animated.View>
       </Animated.View>

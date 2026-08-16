@@ -3,6 +3,7 @@ import { Image } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
+import { TimerIcon } from '@/components/home/icons';
 import { brand } from '@/constants/brand';
 import { resizedImageUrl } from '@/lib/image-transform';
 import { formatRelativeTime } from '@/lib/relative-time';
@@ -15,6 +16,8 @@ type GenerationCardProps = {
   createdAt?: string;
   imageUrl?: string | null;
   placeholder?: boolean;
+  /** Image is 5+ days old and will be auto-removed soon — shows a muted timer badge. */
+  expiringSoon?: boolean;
   onPress: () => void;
 };
 
@@ -23,6 +26,7 @@ export function GenerationCard({
   createdAt,
   imageUrl,
   placeholder = false,
+  expiringSoon = false,
   onPress,
 }: GenerationCardProps) {
   return (
@@ -50,6 +54,11 @@ export function GenerationCard({
                 {placeholder ? <Text style={styles.placeholderLabel}>Preview</Text> : null}
               </LinearGradient>
             )}
+            {expiringSoon ? (
+              <View style={styles.timerBadge}>
+                <TimerIcon size={12} color={brand.warningMuted} />
+              </View>
+            ) : null}
           </View>
           <Text style={styles.title} numberOfLines={1}>
             {title}
@@ -105,6 +114,19 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     overflow: 'hidden',
     marginBottom: 8,
+  },
+  timerBadge: {
+    position: 'absolute',
+    top: 6,
+    right: 6,
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: brand.warningMutedSoft,
+    borderWidth: 1.5,
+    borderColor: '#FFFFFF',
   },
   image: {
     width: '100%',

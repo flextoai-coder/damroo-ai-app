@@ -15,11 +15,12 @@ import {
   type ViewStyle,
 } from 'react-native';
 
+import { TimerIcon } from '@/components/home/icons';
 import { brand } from '@/constants/brand';
 import { formatById } from '@/constants/playground';
 import { resizedImageUrl } from '@/lib/image-transform';
 import type { Generation } from '@/services/generations';
-import { primaryAssetUrl } from '@/services/generations';
+import { isExpiringSoon, isPurged, primaryAssetUrl } from '@/services/generations';
 import { SkeletonMasonryGrid } from '@/components/ui/skeleton';
 
 const GAP = 12;
@@ -166,31 +167,50 @@ function GridTile({
   onPress: () => void;
 }) {
   const url = primaryAssetUrl(generation);
+  const purged = isPurged(generation);
+  const expiring = isExpiringSoon(generation);
+
   return (
     <Pressable
       onPress={onPress}
       style={[styles.tile, { width, height, margin: GAP / 2 }]}
       accessibilityRole="button"
-      accessibilityLabel={generation.prompt}>
-      {url ? (
-        <Image
-          source={{ uri: resizedImageUrl(url, { width, height }) }}
-          style={styles.image}
-          contentFit="cover"
-        />
+      accessibilityLabel={purged ? `${generation.prompt} — image removed` : generation.prompt}>
+      {purged ? (
+        <View style={[styles.image, styles.removedFill]}>
+          <Text style={styles.removedLabel} numberOfLines={3}>
+            {generation.prompt}
+          </Text>
+          <Text style={styles.removedCaption}>Image removed after 7 days</Text>
+        </View>
       ) : (
-        <LinearGradient
-          colors={[brand.creamDeep, brand.orangeSoft]}
-          style={styles.image}
-        />
+        <>
+          {url ? (
+            <Image
+              source={{ uri: resizedImageUrl(url, { width, height }) }}
+              style={styles.image}
+              contentFit="cover"
+            />
+          ) : (
+            <LinearGradient
+              colors={[brand.creamDeep, brand.orangeSoft]}
+              style={styles.image}
+            />
+          )}
+          {expiring ? (
+            <View style={styles.timerBadge}>
+              <TimerIcon size={12} color={brand.warningMuted} />
+            </View>
+          ) : null}
+          <LinearGradient
+            colors={['rgba(15,23,42,0)', 'rgba(15,23,42,0.55)']}
+            style={styles.captionFade}>
+            <Text style={styles.caption} numberOfLines={2}>
+              {generation.prompt}
+            </Text>
+          </LinearGradient>
+        </>
       )}
-      <LinearGradient
-        colors={['rgba(15,23,42,0)', 'rgba(15,23,42,0.55)']}
-        style={styles.captionFade}>
-        <Text style={styles.caption} numberOfLines={2}>
-          {generation.prompt}
-        </Text>
-      </LinearGradient>
     </Pressable>
   );
 }
@@ -203,6 +223,38 @@ const styles = StyleSheet.create({
   },
   image: {
     ...StyleSheet.absoluteFill,
+  },
+  removedFill: {
+    backgroundColor: brand.border,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 14,
+    gap: 6,
+  },
+  removedLabel: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: brand.muted,
+    textAlign: 'center',
+  },
+  removedCaption: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: brand.mutedSoft,
+    textAlign: 'center',
+  },
+  timerBadge: {
+    position: 'absolute',
+    top: 8,
+    right: 8,
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: brand.warningMutedSoft,
+    borderWidth: 1.5,
+    borderColor: '#FFFFFF',
   },
   captionFade: {
     position: 'absolute',

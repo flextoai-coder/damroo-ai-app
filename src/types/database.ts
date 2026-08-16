@@ -319,6 +319,8 @@ export type Database = {
           id: string
           image_count: number
           prompt: string
+          provider_model: string | null
+          provider_usage: Json | null
           quality: Database["public"]["Enums"]["image_quality"]
           reference_image_paths: string[]
           status: Database["public"]["Enums"]["generation_status"]
@@ -336,6 +338,8 @@ export type Database = {
           id?: string
           image_count?: number
           prompt: string
+          provider_model?: string | null
+          provider_usage?: Json | null
           quality?: Database["public"]["Enums"]["image_quality"]
           reference_image_paths?: string[]
           status?: Database["public"]["Enums"]["generation_status"]
@@ -353,6 +357,8 @@ export type Database = {
           id?: string
           image_count?: number
           prompt?: string
+          provider_model?: string | null
+          provider_usage?: Json | null
           quality?: Database["public"]["Enums"]["image_quality"]
           reference_image_paths?: string[]
           status?: Database["public"]["Enums"]["generation_status"]
@@ -531,6 +537,7 @@ export type Database = {
           remix_steps: Json | null
           sort_order: number
           source: Database["public"]["Enums"]["template_source"]
+          status: Database["public"]["Enums"]["template_status"]
           title: string
           updated_at: string
         }
@@ -547,6 +554,7 @@ export type Database = {
           remix_steps?: Json | null
           sort_order?: number
           source?: Database["public"]["Enums"]["template_source"]
+          status?: Database["public"]["Enums"]["template_status"]
           title: string
           updated_at?: string
         }
@@ -563,6 +571,7 @@ export type Database = {
           remix_steps?: Json | null
           sort_order?: number
           source?: Database["public"]["Enums"]["template_source"]
+          status?: Database["public"]["Enums"]["template_status"]
           title?: string
           updated_at?: string
         }
@@ -610,6 +619,7 @@ export type Database = {
       subscription_status: "active" | "expired" | "cancelled" | "past_due"
       template_category: "festival" | "offers" | "products" | "video"
       template_source: "official" | "creator"
+      template_status: "active" | "inactive"
     }
     CompositeTypes: {
       [_ in never]: never
@@ -749,6 +759,7 @@ export const Constants = {
       subscription_status: ["active", "expired", "cancelled", "past_due"],
       template_category: ["festival", "offers", "products", "video"],
       template_source: ["official", "creator"],
+      template_status: ["active", "inactive"],
     },
   },
 } as const

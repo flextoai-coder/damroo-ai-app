@@ -3,6 +3,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { useEffect } from 'react';
 import {
   ActivityIndicator,
+  Keyboard,
   Platform,
   Pressable,
   StyleSheet,
@@ -135,8 +136,9 @@ export function PlaygroundComposer({
   }));
 
   return (
-    <View
+    <Pressable
       onLayout={onLayout}
+      onPress={() => Keyboard.dismiss()}
       style={[
         styles.wrap,
         {
@@ -271,7 +273,7 @@ export function PlaygroundComposer({
           </Pressable>
         </View>
       </BlurView>
-    </View>
+    </Pressable>
   );
 }
 

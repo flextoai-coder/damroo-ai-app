@@ -99,9 +99,13 @@ export function AuthProvider({ children }: PropsWithChildren) {
       }
     };
 
-    void Linking.getInitialURL().then((url) => {
-      if (url) void handleUrl(url);
-    });
+    void Linking.getInitialURL()
+      .then((url) => {
+        if (url) void handleUrl(url);
+      })
+      .catch(() => {
+        // Best-effort — a failed initial-URL read just means no deep-link handoff.
+      });
 
     const sub = Linking.addEventListener('url', ({ url }) => {
       void handleUrl(url);

@@ -71,7 +71,16 @@ export function formatBrandPromptContext(
       .filter((c): c is string => Boolean(c?.trim()))
       .map((c) => c.trim().toUpperCase());
     if (colors.length) {
-      lines.push(`Apply the brand color palette (hex): ${colors.join(', ')}.`);
+      // Hex values are the precise way to specify the exact colors — but
+      // stated plainly like "(hex): #F97316, ...", a text-capable model
+      // (GPT Image 2 especially) tends to render that as literal on-image
+      // text/a label instead of just using it as styling guidance. Spelling
+      // out that these are style-only values, never text to display, keeps
+      // the codes out of the actual pixels while still using them for
+      // backgrounds/accents/typography color, including taglines.
+      lines.push(
+        `Use this exact brand color palette for the design's visual styling — backgrounds, accents, borders, and the color of any text/typography (including taglines or headlines): ${colors.join(', ')}. These are color values to style with, not text to display — never render the hex codes themselves, or any color names, as visible text/typography anywhere in the image.`,
+      );
     }
   }
 

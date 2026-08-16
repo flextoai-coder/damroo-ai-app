@@ -11,28 +11,34 @@ import {
 
 import { SkeletonBox } from '@/components/ui/skeleton';
 import { brand } from '@/constants/brand';
-import { useHomeBanners } from '@/hooks/use-home-data';
 import { resizedImageUrl } from '@/lib/image-transform';
+import type { Banner } from '@/services/banners';
 
 const SIDE = 22;
 /** Wide "hero" aspect suited to horizontal marketing images. */
 const ASPECT_RATIO = 16 / 8;
 
+type BannerCarouselProps = {
+  banners: Banner[];
+  loading: boolean;
+};
+
 /**
- * Paginated hero carousel — one banner fills the screen per page. Purely
- * bucket-driven (see `fetchBanners`): renders nothing while the bucket is
- * empty, no placeholder/empty-state needed since this is a bonus visual, not
- * core content.
+ * Paginated banner carousel — one banner fills the screen per page. Purely
+ * bucket-driven (see `services/banners.ts`): renders nothing while its
+ * folder is empty, no placeholder/empty-state needed since this is a bonus
+ * visual, not core content. Shared by both Home banner slots (Hero Banners,
+ * Banner Position 2) — which folder's data it shows is entirely up to the
+ * caller, passed in as props.
  */
-export function HeroBannerCarousel() {
+export function BannerCarousel({ banners, loading }: BannerCarouselProps) {
   const { width } = useWindowDimensions();
-  const bannersQuery = useHomeBanners();
   const [activeIndex, setActiveIndex] = useState(0);
 
   const itemWidth = width - SIDE * 2;
   const itemHeight = Math.round(itemWidth / ASPECT_RATIO);
 
-  if (bannersQuery.isLoading) {
+  if (loading) {
     return (
       <View style={[styles.wrap, { paddingHorizontal: SIDE }]}>
         <SkeletonBox width={itemWidth} height={itemHeight} borderRadius={20} />
@@ -40,7 +46,6 @@ export function HeroBannerCarousel() {
     );
   }
 
-  const banners = bannersQuery.data ?? [];
   if (banners.length === 0) return null;
 
   const onMomentumScrollEnd = (e: NativeSyntheticEvent<NativeScrollEvent>) => {

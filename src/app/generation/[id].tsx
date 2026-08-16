@@ -48,7 +48,12 @@ import { resizedImageUrl } from '@/lib/image-transform';
 import { requestSaveToGalleryAccess } from '@/lib/media-permissions';
 import { saveImageToGallery } from '@/lib/save-image';
 import { shareImage } from '@/lib/share-image';
-import { fetchGenerationById, fetchLatestCaption, primaryAssetUrl } from '@/services/generations';
+import {
+  fetchGenerationById,
+  fetchLatestCaption,
+  isPurged,
+  primaryAssetUrl,
+} from '@/services/generations';
 import { generateCaption, generateImage, waitForGeneration } from '@/services/playground';
 import {
   isUserCancelledPurchase,
@@ -76,7 +81,7 @@ function TruncatablePrompt({ text }: { text: string }) {
           {text}
         </Text>
       ) : null}
-      <Text style={styles.prompt} numberOfLines={expanded ? undefined : 3}>
+      <Text style={styles.prompt} selectable numberOfLines={expanded ? undefined : 3}>
         {text}
       </Text>
       {truncatable ? (
@@ -424,6 +429,17 @@ export default function GenerationDetailScreen() {
                 : 'It may have been removed or isn’t available offline.'}
             </Text>
           </View>
+        ) : isPurged(generation) ? (
+          <View style={styles.purgedWrap}>
+            <View style={styles.purgedFrame}>
+              <Text style={styles.purgedIcon}>🕐</Text>
+            </View>
+            <Text style={styles.section}>Prompt</Text>
+            <TruncatablePrompt key={generation.id} text={generation.prompt} />
+            <Text style={styles.purgedNotice}>
+              This image was automatically removed after 7 days. The prompt is still saved here.
+            </Text>
+          </View>
         ) : (
           <>
             {allImageUrls.length > 1 ? (
@@ -515,7 +531,9 @@ export default function GenerationDetailScreen() {
                 {displayCaption ? (
                   <>
                     <Text style={styles.section}>Caption</Text>
-                    <Text style={styles.prompt}>{displayCaption}</Text>
+                    <Text style={styles.prompt} selectable>
+                      {displayCaption}
+                    </Text>
                   </>
                 ) : null}
 
@@ -627,6 +645,23 @@ const styles = StyleSheet.create({
   center: { paddingTop: 80, alignItems: 'center', gap: 8 },
   emptyTitle: { fontSize: 18, fontWeight: '800', color: brand.ink },
   emptyBody: { fontSize: 14, color: brand.muted, textAlign: 'center', maxWidth: 280 },
+  purgedWrap: { paddingTop: 8 },
+  purgedFrame: {
+    width: '100%',
+    aspectRatio: 1,
+    borderRadius: 20,
+    backgroundColor: brand.border,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 4,
+  },
+  purgedIcon: { fontSize: 40, opacity: 0.5 },
+  purgedNotice: {
+    marginTop: 14,
+    fontSize: 13,
+    lineHeight: 19,
+    color: brand.muted,
+  },
   frame: {
     width: '100%',
     aspectRatio: 1,

@@ -220,7 +220,13 @@ export function MultiSelectOptionSheet({
     setDraft(values);
     translateY.value = sheetHeight;
     translateY.value = withSpring(0, SHEET_SPRING);
-  }, [visible, sheetHeight, translateY, values]);
+    // Deliberately omits `values` from deps — only re-seed on a real
+    // open/close transition. `confirm` updates the parent's `values` while
+    // this sheet is still visible and mid-dismiss; reacting to that here
+    // would reset translateY and reopen the sheet. The closure captured at
+    // the last real "opened" transition is what we want anyway.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [visible, sheetHeight, translateY]);
 
   const finishClose = () => {
     onClose();

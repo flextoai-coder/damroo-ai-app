@@ -35,6 +35,10 @@ export type GptImageAsset = {
 
 export type GptImageResult = {
   assets: GptImageAsset[];
+  /** Model id actually requested (respects `OPENAI_IMAGE_MODEL` override). */
+  model: string;
+  /** Raw `usage` object from OpenAI's response, if it included one. */
+  usage: unknown;
 };
 
 export async function callGptImage(params: {
@@ -127,5 +131,6 @@ export async function callGptImage(params: {
     throw new Error('GPT Image returned no image data');
   }
 
-  return { assets };
+  const usage = (json as { usage?: unknown }).usage ?? null;
+  return { assets, model, usage };
 }

@@ -22,4 +22,7 @@ export const brand = {
   mutedSoft: '#94A3B8',
   card: '#FFFFFF',
   border: '#E2E8F0',
+  /** "Expiring soon" timer badge — muted amber, distinct from the orange brand accent. */
+  warningMuted: '#CA8A04',
+  warningMutedSoft: '#FEF3C7',
 } as const;

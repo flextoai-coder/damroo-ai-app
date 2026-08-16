@@ -2,7 +2,7 @@ import 'jsr:@supabase/functions-js/edge-runtime.d.ts';
 
 import { corsHeaders, errorResponse, jsonResponse } from '../_shared/cors.ts';
 import { getServiceClient, requireUser } from '../_shared/supabase.ts';
-import type { SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.49.1';
+import { removeAllUnderPrefix } from '../_shared/storage-cleanup.ts';
 
 /**
  * Every bucket that stores files under a top-level `{userId}/...` prefix.
@@ -11,30 +11,6 @@ import type { SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.49.1
  * which foreign keys don't reach — needs explicit cleanup here.
  */
 const STORAGE_BUCKETS = ['generations', 'references', 'brand-assets', 'avatars'];
-
-/** Recursively removes every object under `prefix` in `bucket` (folders show up as entries with `id: null`). */
-async function removeAllUnderPrefix(
-  service: SupabaseClient,
-  bucket: string,
-  prefix: string,
-): Promise<void> {
-  const { data: entries, error } = await service.storage.from(bucket).list(prefix, { limit: 1000 });
-  if (error || !entries || entries.length === 0) return;
-
-  const filePaths: string[] = [];
-  for (const entry of entries) {
-    const path = `${prefix}/${entry.name}`;
-    if (entry.id === null) {
-      await removeAllUnderPrefix(service, bucket, path);
-    } else {
-      filePaths.push(path);
-    }
-  }
-
-  if (filePaths.length > 0) {
-    await service.storage.from(bucket).remove(filePaths);
-  }
-}
 
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') {

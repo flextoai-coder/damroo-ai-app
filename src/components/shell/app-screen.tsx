@@ -21,7 +21,9 @@ import Animated, {
 } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Svg, { Defs, RadialGradient, Rect, Stop } from 'react-native-svg';
+import * as Sentry from '@sentry/react-native';
 
+import { CrashFallback } from '@/components/shell/crash-fallback';
 import { brand } from '@/constants/brand';
 import { TAB_SLIDE_DURATION_MS } from '@/constants/tab-transition';
 import { useTabShellStore } from '@/stores/tab-shell-store';
@@ -231,7 +233,20 @@ export function AppScreen({
           },
           contentStyle,
         ]}>
-        {children}
+        {/* Scoped to just this screen's content — a render-time error here
+            (e.g. from a background generation's state update landing while
+            this tab is off-screen but still mounted, per the slide-transform
+            design above) shows a local crash card instead of taking down the
+            whole app via the root boundary in _layout.tsx. FloatingTabBar is
+            a sibling of every AppScreen instance in the navigator's tree, not
+            a descendant, so it stays interactive even if this trips. */}
+        <Sentry.ErrorBoundary
+          fallback={({ resetError }) => <CrashFallback onReload={resetError} />}
+          beforeCapture={(scope) => {
+            scope.setTag('appScreenTabIndex', tabIndex !== undefined ? String(tabIndex) : 'stack');
+          }}>
+          {children}
+        </Sentry.ErrorBoundary>
       </View>
 
       {showReload ? (

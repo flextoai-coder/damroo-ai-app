@@ -168,6 +168,13 @@ export default function BrandKitScreen() {
 
         {brandKitQuery.isLoading ? (
           <BrandKitSkeleton />
+        ) : brandKitQuery.isError && !brandKitQuery.data ? (
+          // Only shown when there's truly nothing to fall back to (first
+          // load failed) — a failed background refetch with existing data
+          // just keeps showing that data below instead of blocking the form.
+          <View style={styles.loader}>
+            <Text style={styles.errorText}>Couldn’t load your brand kit. Pull to refresh.</Text>
+          </View>
         ) : (
           <>
             <View style={styles.previewCard}>
@@ -463,6 +470,17 @@ const styles = StyleSheet.create({
   },
   chipLabelActive: {
     color: brand.orangeDeep,
+  },
+  loader: {
+    paddingTop: 72,
+    alignItems: 'center',
+  },
+  errorText: {
+    color: brand.muted,
+    fontSize: 14,
+    fontWeight: '600',
+    textAlign: 'center',
+    paddingHorizontal: 24,
   },
   error: {
     marginBottom: 12,

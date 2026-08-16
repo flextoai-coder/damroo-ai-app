@@ -88,6 +88,23 @@ Header: `x-cron-secret: <CRON_SECRET>` (same secret as above)
 Marks anything still `pending` after 10 minutes as `failed` and refunds its
 credits — idempotent, safe to run as often as you like.
 
+## Cron — purge expired generation assets
+
+Generated images are retained for 7 days; this sweep deletes the actual
+Storage objects + `generation_assets` rows once a generation crosses that
+age, keeping the `generations` row itself (and its prompt) visible in
+history as a grayed-out placeholder. Runs daily so every image's own
+7-day window is honored regardless of when in the week it was created.
+
+Schedule a daily POST to:
+
+`https://thvqecpkurkzcmkdqzki.supabase.co/functions/v1/cron-purge-expired-generations`
+
+Header: `x-cron-secret: <CRON_SECRET>` (same secret as above)
+
+Idempotent — a `generation_assets!inner` join means a generation with no
+assets left simply stops matching on the next run.
+
 ## Edge secrets checklist
 
 - `ARK_API_KEY` (+ optional `ARK_BASE_URL`, `ARK_MODEL`)

@@ -1,3 +1,4 @@
+import * as Sentry from '@sentry/react-native';
 import { create } from 'zustand';
 
 import type { ComposerAttachment } from '@/stores/chat-composer-store';
@@ -48,7 +49,13 @@ export const usePlaygroundStore = create<PlaygroundState>((set) => ({
   turns: [],
   conversationId: null,
   setConversationId: (conversationId) => set({ conversationId }),
-  addUserTurn: (turn) =>
+  addUserTurn: (turn) => {
+    Sentry.addBreadcrumb({
+      category: 'playground',
+      message: 'user turn added',
+      level: 'info',
+      data: { turnId: turn.id },
+    });
     set((s) => ({
       turns: [
         ...s.turns,
@@ -58,8 +65,15 @@ export const usePlaygroundStore = create<PlaygroundState>((set) => ({
           createdAt: turn.createdAt ?? new Date().toISOString(),
         },
       ],
-    })),
-  addAssistantTurn: (turn) =>
+    }));
+  },
+  addAssistantTurn: (turn) => {
+    Sentry.addBreadcrumb({
+      category: 'playground',
+      message: 'assistant turn added',
+      level: 'info',
+      data: { turnId: turn.id, parentUserId: turn.parentUserId, status: turn.status },
+    });
     set((s) => ({
       turns: [
         ...s.turns,
@@ -69,12 +83,47 @@ export const usePlaygroundStore = create<PlaygroundState>((set) => ({
           createdAt: turn.createdAt ?? new Date().toISOString(),
         },
       ],
-    })),
-  patchAssistant: (id, patch) =>
+    }));
+  },
+  // Breadcrumb trail (user turn added → assistant turn added → generation id
+  // received → generation completed/failed) is the diagnostic path for
+  // pinpointing which state transition preceded a render throw caught by
+  // AppScreen's scoped error boundary — see plan notes in app-screen.tsx.
+  patchAssistant: (id, patch) => {
+    if (patch.generationId !== undefined) {
+      Sentry.addBreadcrumb({
+        category: 'playground',
+        message: 'generation id received',
+        level: 'info',
+        data: { id, generationId: patch.generationId },
+      });
+    } else if (patch.status === 'done') {
+      Sentry.addBreadcrumb({
+        category: 'playground',
+        message: 'generation completed',
+        level: 'info',
+        data: { id, imageCount: patch.imageUrls?.length },
+      });
+    } else if (patch.status === 'error') {
+      Sentry.addBreadcrumb({
+        category: 'playground',
+        message: 'generation failed',
+        level: 'warning',
+        data: { id, error: patch.error },
+      });
+    } else if (patch.status === 'loading') {
+      Sentry.addBreadcrumb({
+        category: 'playground',
+        message: 'generation (re)started',
+        level: 'info',
+        data: { id },
+      });
+    }
     set((s) => ({
       turns: s.turns.map((t) =>
         t.role === 'assistant' && t.id === id ? { ...t, ...patch } : t,
       ),
-    })),
+    }));
+  },
   clear: () => set({ turns: [], conversationId: null }),
 }));

@@ -158,6 +158,12 @@ export function ImageViewerModal({ visible, onClose, url }: ImageViewerModalProp
               style={StyleSheet.absoluteFill}
               contentFit="contain"
               transition={150}
+              // Decode at the source's native resolution instead of
+              // downsampling to the container size (expo-image's default) —
+              // otherwise pinching in past the initial container size would
+              // just upscale an already-downsampled texture instead of
+              // revealing real detail, defeating the point of a zoom viewer.
+              allowDownscaling={false}
             />
           </Animated.View>
         </GestureDetector>

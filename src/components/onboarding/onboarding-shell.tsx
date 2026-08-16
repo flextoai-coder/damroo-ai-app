@@ -60,7 +60,6 @@ export function OnboardingShell({
           styles.content,
           {
             paddingTop: insets.top + 8,
-            paddingBottom: insets.bottom + 28,
           },
         ]}
         behavior="padding">
@@ -115,7 +114,17 @@ export function OnboardingShell({
           <View style={styles.stepContent}>{children}</View>
         </ScrollView>
 
-        <View style={[styles.footer, showSkip && styles.footerSplit]}>
+        <View
+          style={[
+            styles.footer,
+            showSkip && styles.footerSplit,
+            // Not on the KeyboardAvoidingView itself — its own `behavior="padding"`
+            // animated style always sets `paddingBottom` (to 0 once the keyboard is
+            // closed), which as the last entry in that node's style array silently
+            // overrides any static paddingBottom passed in. Putting the safe-area
+            // clearance on this child instead sidesteps that entirely.
+            { paddingBottom: insets.bottom + 28 },
+          ]}>
           {showSkip ? (
             <Pressable
               onPress={onSkip}

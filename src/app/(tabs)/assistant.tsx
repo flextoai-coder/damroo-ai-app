@@ -1,10 +1,11 @@
 import * as Clipboard from 'expo-clipboard';
-import { useRouter, type Href } from 'expo-router';
-import { useEffect, useRef, useState } from 'react';
+import { useFocusEffect, useRouter, type Href } from 'expo-router';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Alert,
   FlatList,
   Keyboard,
+  Pressable,
   StyleSheet,
   View,
   type NativeScrollEvent,
@@ -64,6 +65,7 @@ import {
   type AssistantTurn,
   type PlaygroundTurn,
 } from '@/stores/playground-store';
+import { useTabShellStore } from '@/stores/tab-shell-store';
 import { toast } from '@/stores/toast-store';
 
 function newId(prefix: string) {
@@ -168,9 +170,13 @@ export default function AssistantScreen() {
 
   useEffect(() => {
     let mounted = true;
-    void Clipboard.hasImageAsync().then((has) => {
-      if (mounted) setClipboardHasImage(has);
-    });
+    void Clipboard.hasImageAsync()
+      .then((has) => {
+        if (mounted) setClipboardHasImage(has);
+      })
+      .catch(() => {
+        // Best-effort — the "paste" affordance just stays hidden if this fails.
+      });
 
     const subscription = Clipboard.addClipboardListener(({ contentTypes }) => {
       setClipboardHasImage(contentTypes.includes(Clipboard.ContentType.IMAGE));
@@ -181,6 +187,37 @@ export default function AssistantScreen() {
       subscription.remove();
     };
   }, []);
+
+  // This screen stays mounted for the app's whole lifetime (it's a hidden
+  // tab opened via the FAB, not pushed/popped), so its queries only ever
+  // fetch once on first mount otherwise — credits and brand kit toggles
+  // could go stale after being changed elsewhere (a purchase on Profile, an
+  // edit on Brand Kit) and never refresh until something unrelated happens
+  // to invalidate them. Refetch both every time the tab regains focus.
+  //
+  // Also assert this screen's own tab index directly, rather than relying
+  // solely on `FloatingTabBar`'s effect (which watches the tab navigator's
+  // `state.index`) to keep `activeTabIndex` in sync. Every other tab is only
+  // ever reached via that tab bar's own `onTabPress` → `navigation.navigate`,
+  // but this screen is reached via `router.push('/(tabs)/assistant')` from
+  // several places (Home, Templates, the FAB) — a different navigation path
+  // that isn't guaranteed to update `state.index` in time for `AppScreen`'s
+  // slide-position calculation on this screen's very first render here. If
+  // `activeTabIndex` lags, `AppScreen` computes a non-zero `slideTarget` and
+  // parks this whole screen (including its own back button) off-screen —
+  // a blank screen with no way back. Setting it directly on focus removes
+  // that dependency entirely, regardless of how this screen was reached.
+  useFocusEffect(
+    useCallback(() => {
+      useTabShellStore.getState().setActiveTabIndex(4);
+      void subscriptionQuery.refetch();
+      void brandKitQuery.refetch();
+      // Depend on the stable `refetch` functions only, not the query
+      // objects themselves — those get a new identity on every data change,
+      // which would re-run this on refetch completion too, not just on focus.
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [subscriptionQuery.refetch, brandKitQuery.refetch]),
+  );
 
   const hasComposerContent =
     turns.length > 0 ||
@@ -614,6 +651,7 @@ export default function AssistantScreen() {
 
   const onScrollBeginDrag = (_e: NativeSyntheticEvent<NativeScrollEvent>) => {
     setPopover(null);
+    Keyboard.dismiss();
   };
 
   const { height: kbHeight } = useReanimatedKeyboardAnimation();
@@ -636,7 +674,9 @@ export default function AssistantScreen() {
 
       <View style={[styles.flex, { paddingBottom: composerHeight }]}>
         {turns.length === 0 ? (
-          <PlaygroundEmptyState />
+          <Pressable style={styles.flex} onPress={() => Keyboard.dismiss()}>
+            <PlaygroundEmptyState />
+          </Pressable>
         ) : (
           <FlatList
             ref={listRef}

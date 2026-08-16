@@ -25,6 +25,10 @@ export function sizeForAspect(aspectRatio: string, quality: '2K' | '4K'): string
 
 export type SeedreamResult = {
   urls: string[];
+  /** Model id actually requested (respects `ARK_MODEL` override). */
+  model: string;
+  /** Raw `usage` object from Ark's response, if it included one. */
+  usage: unknown;
 };
 
 export async function callSeedream(params: {
@@ -101,5 +105,7 @@ export async function callSeedream(params: {
   if (urls.length === 0) {
     throw new Error('Seedream returned no image URLs');
   }
-  return { urls };
+
+  const usage = (json as { usage?: unknown }).usage ?? null;
+  return { urls, model, usage };
 }

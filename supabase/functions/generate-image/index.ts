@@ -37,7 +37,7 @@ type GenerateBody = {
   use_brand_logo?: boolean;
   use_brand_name?: boolean;
   use_brand_colors?: boolean;
-  /** Which generation model to use — defaults to Seedream 4.5 for anything else. */
+  /** Which generation model to use — defaults to GPT Image 2 for anything but an explicit 'seedream-4.5'. */
   model?: string;
 };
 
@@ -131,8 +131,10 @@ async function finishGeneration(params: FinishGenerationParams): Promise<void> {
     const seedreamPrompt = withBrandContext(promptWithVariation, brandContext);
 
     let rawAssets: Array<{ bytes: Uint8Array; contentType: string }>;
+    let providerModel: string;
+    let providerUsage: unknown;
     if (params.useGptImage) {
-      const { assets: gptAssets } = await callGptImage({
+      const { assets: gptAssets, model, usage } = await callGptImage({
         prompt: seedreamPrompt,
         aspectRatio: params.aspectRatio,
         quality: params.quality,
@@ -143,14 +145,18 @@ async function finishGeneration(params: FinishGenerationParams): Promise<void> {
         bytes: base64ToUint8Array(a.base64),
         contentType: a.contentType,
       }));
+      providerModel = model;
+      providerUsage = usage;
     } else {
-      const { urls } = await callSeedream({
+      const { urls, model, usage } = await callSeedream({
         prompt: seedreamPrompt,
         aspectRatio: params.aspectRatio,
         quality: params.quality,
         imageCount: params.imageCount,
         referenceImages,
       });
+      providerModel = model;
+      providerUsage = usage;
       rawAssets = [];
       for (let i = 0; i < urls.length; i++) {
         const downloaded = await fetch(urls[i]);
@@ -210,7 +216,12 @@ async function finishGeneration(params: FinishGenerationParams): Promise<void> {
 
     const { error: completeError } = await service
       .from('generations')
-      .update({ status: 'completed', error_message: null })
+      .update({
+        status: 'completed',
+        error_message: null,
+        provider_model: providerModel,
+        provider_usage: providerUsage,
+      })
       .eq('id', generationId);
     if (completeError) throw new Error(completeError.message);
 
@@ -434,7 +445,7 @@ Deno.serve(async (req) => {
         useBrandLogo,
         useBrandName,
         useBrandColors,
-        useGptImage: body.model === 'gpt-image-2',
+        useGptImage: body.model !== 'seedream-4.5',
       }),
     );
 

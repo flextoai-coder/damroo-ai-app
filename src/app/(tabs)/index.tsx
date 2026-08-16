@@ -2,13 +2,14 @@ import type { FlashListRef } from '@shopify/flash-list';
 import { Image } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter, useScrollToTop, type Href } from 'expo-router';
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
-import { FestivalCta } from '@/components/home/festival-cta';
+import { BannerCarousel } from '@/components/home/banner-carousel';
+import { ExpiringSoonBanner } from '@/components/home/expiring-soon-banner';
+import { ExpiringSoonSheet } from '@/components/home/expiring-soon-sheet';
 import { GenerationCard, NewDesignTile } from '@/components/home/generation-card';
 import { GenerationsGrid, GRID_CONTAINER_INSET } from '@/components/home/generations-grid';
-import { HeroBannerCarousel } from '@/components/home/hero-banner-carousel';
 import { HomeRail } from '@/components/home/home-rail';
 import { PosterCard } from '@/components/home/poster-card';
 import { RenewalBanner } from '@/components/home/renewal-banner';
@@ -20,15 +21,22 @@ import { SkeletonRail } from '@/components/ui/skeleton';
 import { TemplateConfigureSheet } from '@/components/templates/template-configure-sheet';
 import { brand } from '@/constants/brand';
 import { nextPlanId, type Plan, type PlanId } from '@/constants/plans';
-import { useHomeBanners, useInfiniteGenerations, useHomeTemplates } from '@/hooks/use-home-data';
+import { useExpiringSoonGenerations } from '@/hooks/use-expiring-generations';
+import {
+  useBannerPosition2,
+  useHeroBanners,
+  useInfiniteGenerations,
+  useHomeTemplates,
+} from '@/hooks/use-home-data';
 import { useTabScreenPadding } from '@/hooks/use-screen-padding';
 import { useSession } from '@/hooks/use-session';
 import { useSubscription } from '@/hooks/use-subscription';
 import { useTabBarScroll } from '@/hooks/use-tab-bar-scroll';
 import { useTemplateConfigureFlow } from '@/hooks/use-template-configure-flow';
 import { resizedImageUrl } from '@/lib/image-transform';
+import { markExpiringNoticeShown, shouldShowExpiringNoticeToday } from '@/lib/expiring-notice-gate';
 import type { Generation } from '@/services/generations';
-import { primaryAssetUrl } from '@/services/generations';
+import { isExpiringSoon, primaryAssetUrl } from '@/services/generations';
 import {
   isUserCancelledPurchase,
   purchaseErrorMessage,
@@ -51,12 +59,26 @@ export default function HomeScreen() {
   const screenPadding = useTabScreenPadding();
   const generationsQuery = useInfiniteGenerations();
   const templatesQuery = useHomeTemplates();
-  const bannersQuery = useHomeBanners();
+  const heroBannersQuery = useHeroBanners();
+  const banner2Query = useBannerPosition2();
   const subscriptionQuery = useSubscription();
+  const expiringSoonQuery = useExpiringSoonGenerations();
   const listRef = useRef<FlashListRef<Generation>>(null);
   useScrollToTop(listRef);
   const generationsY = useRef(0);
   const [plansOpen, setPlansOpen] = useState(false);
+  const [expiringSheetOpen, setExpiringSheetOpen] = useState(false);
+
+  useEffect(() => {
+    const items = expiringSoonQuery.data;
+    if (!user?.id || !items || items.length === 0) return;
+    void (async () => {
+      if (await shouldShowExpiringNoticeToday(user.id)) {
+        setExpiringSheetOpen(true);
+        await markExpiringNoticeShown(user.id);
+      }
+    })();
+  }, [expiringSoonQuery.data, user?.id]);
 
   const fullName =
     profile?.full_name ??
@@ -70,7 +92,10 @@ export default function HomeScreen() {
   const generations = generationsQuery.data?.pages.flatMap((page) => page.items) ?? [];
   const templates = templatesQuery.data ?? [];
   const refreshing =
-    generationsQuery.isRefetching || templatesQuery.isRefetching || bannersQuery.isRefetching;
+    generationsQuery.isRefetching ||
+    templatesQuery.isRefetching ||
+    heroBannersQuery.isRefetching ||
+    banner2Query.isRefetching;
 
   const openPlayground = () => {
     router.push('/(tabs)/assistant' as Href);
@@ -142,7 +167,8 @@ export default function HomeScreen() {
   const onRefresh = () => {
     void generationsQuery.refetch();
     void templatesQuery.refetch();
-    void bannersQuery.refetch();
+    void heroBannersQuery.refetch();
+    void banner2Query.refetch();
   };
 
   const latestRailItems = generations.slice(0, 8).map((g) => ({
@@ -150,6 +176,7 @@ export default function HomeScreen() {
     title: g.prompt.trim().slice(0, 28) || 'Untitled',
     createdAt: g.created_at,
     imageUrl: primaryAssetUrl(g),
+    expiringSoon: isExpiringSoon(g),
   }));
 
   const templateRailItems =
@@ -212,7 +239,7 @@ export default function HomeScreen() {
       </View>
 
       {/* 2. Hero banner carousel */}
-      <HeroBannerCarousel />
+      <BannerCarousel banners={heroBannersQuery.data ?? []} loading={heroBannersQuery.isLoading} />
 
       {/* 3. Renew / upgrade alert */}
       {bannerMode === 'renew' ? (
@@ -241,13 +268,20 @@ export default function HomeScreen() {
             title={item.title}
             createdAt={item.createdAt}
             imageUrl={item.imageUrl}
+            expiringSoon={item.expiringSoon}
             onPress={() => openGeneration(item.id)}
           />
         ))}
       </HomeRail>
 
-      {/* 5. Festival CTA */}
-      <FestivalCta onPress={openPlayground} />
+      {/* 4b. Banner Position 2 — just below Latest Generations by You */}
+      <BannerCarousel banners={banner2Query.data ?? []} loading={banner2Query.isLoading} />
+
+      {/* 4c. Images expiring soon */}
+      <ExpiringSoonBanner
+        count={expiringSoonQuery.data?.length ?? 0}
+        onPress={() => setExpiringSheetOpen(true)}
+      />
 
       {/* 6. Based on your business */}
       <SectionHead
@@ -321,6 +355,13 @@ export default function HomeScreen() {
         config={configureFlow.config}
         onFinish={configureFlow.finish}
         onCancel={configureFlow.cancel}
+      />
+
+      <ExpiringSoonSheet
+        visible={expiringSheetOpen}
+        onClose={() => setExpiringSheetOpen(false)}
+        generations={expiringSoonQuery.data ?? []}
+        onSelect={openGeneration}
       />
     </AppScreen>
   );

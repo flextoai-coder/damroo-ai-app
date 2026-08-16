@@ -33,3 +33,6 @@ verify_jwt = false
 
 [functions.cron-expire-stuck-generations]
 verify_jwt = false
+
+[functions.cron-purge-expired-generations]
+verify_jwt = false

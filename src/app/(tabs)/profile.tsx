@@ -226,6 +226,12 @@ export default function ProfileScreen() {
                 .then((p) => {
                   if (p) setProfile(p);
                 })
+                .catch(() => {
+                  // Pull-to-refresh failing (network/egress) shouldn't leave
+                  // an unhandled rejection in flight — the subscription
+                  // refetch above still runs independently either way, and
+                  // the profile just stays whatever it was before.
+                })
                 .finally(() => setRefreshingProfile(false));
             }}
             tintColor={brand.orange}

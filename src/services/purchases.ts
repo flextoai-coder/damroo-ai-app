@@ -93,6 +93,16 @@ export async function purchasePlan(planId: PlanId): Promise<CustomerInfo> {
 }
 
 /**
+ * Re-links whatever active store subscription the signed-in Apple/Google
+ * account already owns to this RevenueCat user — e.g. after a reinstall, or
+ * a purchase that didn't sync. Required to be reachable from the paywall
+ * per App Store Review Guideline 3.1.2.
+ */
+export async function restorePurchases(): Promise<CustomerInfo> {
+  return Purchases.restorePurchases();
+}
+
+/**
  * Opens the native subscription-management surface so the user can cancel or
  * change their plan. Neither Apple nor Google let an app cancel a
  * subscription on the user's behalf — this has to go through their own UI.

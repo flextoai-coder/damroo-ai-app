@@ -3,9 +3,11 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { useEffect, useRef, useState } from 'react';
 import {
   FlatList,
+  Linking,
   Modal,
   NativeScrollEvent,
   NativeSyntheticEvent,
+  Platform,
   Pressable,
   StyleSheet,
   Text,
@@ -32,6 +34,11 @@ import { CheckIcon, CrownIcon } from '@/components/profile/icons';
 import { brand } from '@/constants/brand';
 import { formatPlanPrice, PLANS, type Plan, type PlanId } from '@/constants/plans';
 import { SHEET_SPRING } from '@/constants/sheet-motion';
+import { STORE } from '@/constants/store';
+import { queryClient } from '@/lib/query-client';
+import { toUserErrorMessage } from '@/lib/errors';
+import { restorePurchases } from '@/services/purchases';
+import { toast } from '@/stores/toast-store';
 
 const AnimatedFlatList = Animated.createAnimatedComponent(FlatList<Plan>);
 
@@ -61,6 +68,7 @@ export function PlanPickerSheet({
   const { width, height } = useWindowDimensions();
   const listRef = useRef<FlatList<Plan>>(null);
   const [activeIndex, setActiveIndex] = useState(1);
+  const [restoring, setRestoring] = useState(false);
 
   const itemWidth = Math.round(width * 0.72);
   const itemGap = 14;
@@ -162,6 +170,24 @@ export function PlanPickerSheet({
 
   const activePlan = PLANS[activeIndex] ?? PLANS[1];
   const isCurrent = currentPlanId != null && activePlan?.id === currentPlanId;
+
+  const onRestore = async () => {
+    if (restoring) return;
+    setRestoring(true);
+    try {
+      const info = await restorePurchases();
+      void queryClient.invalidateQueries({ queryKey: ['subscription'] });
+      const hasActiveEntitlement = Object.keys(info.entitlements.active).length > 0;
+      toast(
+        hasActiveEntitlement ? 'Purchases restored' : 'No previous purchases found for this account',
+        hasActiveEntitlement ? 'success' : 'info',
+      );
+    } catch (e) {
+      toast(toUserErrorMessage(e, 'Couldn’t restore purchases'), 'error');
+    } finally {
+      setRestoring(false);
+    }
+  };
 
   return (
     <Modal
@@ -282,6 +308,29 @@ export function PlanPickerSheet({
                 </Text>
               </LinearGradient>
             </Pressable>
+
+            <Text style={styles.disclosure}>
+              Subscriptions renew automatically at{' '}
+              {formatPlanPrice(activePlan.priceInr)}/month unless canceled at least 24 hours before
+              the current period ends. Manage or cancel anytime in your{' '}
+              {Platform.OS === 'ios' ? 'App Store' : 'Google Play'} account settings.
+            </Text>
+
+            <View style={styles.legalRow}>
+              <Pressable onPress={onRestore} disabled={restoring} hitSlop={6}>
+                <Text style={styles.legalLink}>
+                  {restoring ? 'Restoring…' : 'Restore Purchases'}
+                </Text>
+              </Pressable>
+              <Text style={styles.legalDot}>·</Text>
+              <Pressable onPress={() => Linking.openURL(STORE.termsUrl)} hitSlop={6}>
+                <Text style={styles.legalLink}>Terms of Use</Text>
+              </Pressable>
+              <Text style={styles.legalDot}>·</Text>
+              <Pressable onPress={() => Linking.openURL(STORE.privacyPolicyUrl)} hitSlop={6}>
+                <Text style={styles.legalLink}>Privacy Policy</Text>
+              </Pressable>
+            </View>
           </View>
         </Animated.View>
       </GestureHandlerRootView>
@@ -590,5 +639,31 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     fontSize: 15,
     fontWeight: '800',
+  },
+  disclosure: {
+    marginTop: 12,
+    marginHorizontal: 22,
+    fontSize: 11,
+    lineHeight: 15,
+    fontWeight: '500',
+    color: brand.muted,
+    textAlign: 'center',
+  },
+  legalRow: {
+    marginTop: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+  },
+  legalLink: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: brand.orangeDeep,
+  },
+  legalDot: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: brand.muted,
   },
 });

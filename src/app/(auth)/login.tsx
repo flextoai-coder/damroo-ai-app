@@ -90,7 +90,11 @@ export default function LoginScreen() {
     (mode !== 'email-signup' || strength.isAcceptable);
 
   useEffect(() => {
-    void isAppleAuthAvailable().then(setAppleAvailable);
+    void isAppleAuthAvailable()
+      .then(setAppleAvailable)
+      .catch(() => {
+        // Best-effort — Apple Sign-In button just stays hidden if this fails.
+      });
   }, []);
 
   const resetFormMessages = () => {

@@ -15,14 +15,14 @@ export type PlaygroundFormat = {
 
 export const PLAYGROUND_MODELS: PlaygroundModel[] = [
   {
-    id: 'seedream-4.5',
-    name: 'Seedream 4.5',
-    description: 'ByteDance flagship for branded posters & product shots',
-  },
-  {
     id: 'gpt-image-2',
     name: 'GPT Image 2',
     description: 'OpenAI’s latest — strong text rendering & instruction-following',
+  },
+  {
+    id: 'seedream-4.5',
+    name: 'Seedream 4.5',
+    description: 'ByteDance flagship for branded posters & product shots',
   },
 ];
 
@@ -92,8 +92,8 @@ export function modelById(id: string): PlaygroundModel {
 /** Mirrors `creditsPerImage` in supabase/functions/_shared/credit-cost.ts — keep in sync. */
 export function creditsPerImage(modelId: string, quality: '2K' | '4K'): number {
   if (modelId === 'gpt-image-2') {
+    // GPT Image 2 (default model).
     return quality === '4K' ? 60 : 25;
   }
-  // Seedream 4.5 (default model).
   return quality === '4K' ? 50 : 20;
 }

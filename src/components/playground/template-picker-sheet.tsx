@@ -1,6 +1,7 @@
 import { BlurView } from 'expo-blur';
 import { useEffect, useState } from 'react';
 import {
+  ActivityIndicator,
   Modal,
   Pressable,
   ScrollView,
@@ -23,7 +24,6 @@ import { PosterCard } from '@/components/home/poster-card';
 import { TemplatesEmptyState } from '@/components/templates/empty-state';
 import { TemplateFilterChips } from '@/components/templates/filter-chips';
 import { TemplateSearchBar } from '@/components/templates/search-bar';
-import { SkeletonGrid } from '@/components/ui/skeleton';
 import { brand } from '@/constants/brand';
 import { SHEET_SPRING } from '@/constants/sheet-motion';
 import type { TemplateIndustryFilter } from '@/constants/templates';
@@ -48,7 +48,7 @@ export function TemplatePickerSheet({ visible, onClose, onSelect }: TemplatePick
   const [search, setSearch] = useState('');
   const [industry, setIndustry] = useState<TemplateIndustryFilter>('all');
 
-  const { templates, industries, isLoading, isError, refetch } = useFilteredTemplates(
+  const { templates, industries, isLoading, isFetching, isError, refetch } = useFilteredTemplates(
     search,
     industry,
   );
@@ -71,9 +71,15 @@ export function TemplatePickerSheet({ visible, onClose, onSelect }: TemplatePick
       return;
     }
 
+    // The catalog query stays mounted for the app's whole lifetime (this
+    // sheet never unmounts, `visible` just hides it), so re-opening it
+    // doesn't naturally refetch on its own — force a refresh every time it's
+    // opened rather than potentially showing a catalog that's gone stale
+    // (a template published/edited elsewhere) since the last time it was up.
+    void refetch();
     translateY.value = sheetHeight;
     translateY.value = withSpring(0, SHEET_SPRING);
-  }, [visible, sheetHeight, translateY]);
+  }, [visible, sheetHeight, translateY, refetch]);
 
   const finishClose = () => {
     onClose();
@@ -151,6 +157,11 @@ export function TemplatePickerSheet({ visible, onClose, onSelect }: TemplatePick
               <View style={styles.headerCopy}>
                 <Text style={styles.title}>Templates</Text>
               </View>
+              {/* Background refresh on reopen — quiet indicator, keeps the
+                  already-loaded grid visible instead of blanking it. */}
+              {isFetching && !isLoading ? (
+                <ActivityIndicator color={brand.orangeDeep} />
+              ) : null}
             </View>
 
             <TemplateSearchBar value={search} onChangeText={setSearch} />
@@ -161,9 +172,9 @@ export function TemplatePickerSheet({ visible, onClose, onSelect }: TemplatePick
             />
 
             {isLoading ? (
-              <ScrollView contentContainerStyle={styles.gridContent}>
-                <SkeletonGrid screenWidth={width} itemHeight={196} count={4} />
-              </ScrollView>
+              <View style={styles.loader}>
+                <ActivityIndicator color={brand.orangeDeep} size="large" />
+              </View>
             ) : isError ? (
               <View style={styles.loader}>
                 <Text style={styles.errorText}>Couldn’t load templates.</Text>

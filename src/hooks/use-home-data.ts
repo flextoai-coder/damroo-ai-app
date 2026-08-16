@@ -1,15 +1,23 @@
 import { useInfiniteQuery, useQuery } from '@tanstack/react-query';
 
-import { fetchBanners } from '@/services/banners';
+import { fetchBannerPosition2, fetchHeroBanners } from '@/services/banners';
 import { fetchUserGenerations, fetchUserGenerationsPage } from '@/services/generations';
 import { fetchPublishedTemplates } from '@/services/templates';
 import { useSession } from '@/hooks/use-session';
 
 /** Home hero banners — bucket-driven, same for every user. */
-export function useHomeBanners() {
+export function useHeroBanners() {
   return useQuery({
-    queryKey: ['banners', 'home'],
-    queryFn: fetchBanners,
+    queryKey: ['banners', 'hero'],
+    queryFn: fetchHeroBanners,
+  });
+}
+
+/** Second banner slot, shown just below the "Latest Generations by You" rail. */
+export function useBannerPosition2() {
+  return useQuery({
+    queryKey: ['banners', 'position2'],
+    queryFn: fetchBannerPosition2,
   });
 }
 
